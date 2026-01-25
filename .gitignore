@@ -1,33 +1,24 @@
-
-# --- SECRETS (EL MÉS IMPORTANT) ---
+# --- SECRETS ---
 .env
+.env.*
 secrets.json
 
 # --- PYTHON / POETRY ---
 __pycache__/
 *.py[cod]
-*$py.class
 .venv/
 venv/
-ENV/
-dist/
-build/
 .python-version
-.pytest_cache/
-.mypy_cache/
+poetry.lock
 
-# --- IDE (VS CODE / PYCHARM) ---
+# --- DADES ---
+# Ignorem els CSVs de dades per no col·lapsar el repositori
+*.csv
+
+# --- IDEs ---
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# --- DADES (OPCIONAL) ---
-# Si no vols pujar els CSVs pesats al GitHub, activa aquestes línies:
-# *.csv
-# *.xlsx
-
-# --- OS (WINDOWS/MAC) ---
-Thumbs.db
-db.mndfogsabqdiifycqzbm.supabase.co
+# --- OS ---
 .DS_Store
+Thumbs.db
