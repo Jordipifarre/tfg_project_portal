@@ -10,22 +10,20 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
     
-    # Per a l'Agent SQL necessitarem la Connection String (Postgres)
-    # Recorda que al .env l'has de posar així: 
-    # DATABASE_URL="postgresql://postgres.[ID]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres"
+    # --- DATABASE ---
     DATABASE_URL: str
 
     # --- IA (OLLAMA) ---
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5-coder:7b"
 
-    # Configuració de Pydantic per llegir el fitxer .env
+    # Pydantic Settings Config
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
-        extra="ignore" # Ignora altres variables que puguis tenir al .env
+        extra="ignore" 
     )
 
-# Instància global que importarem des de tota l'app
+# Global settings instance
 settings = Settings()
