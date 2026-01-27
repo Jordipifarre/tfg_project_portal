@@ -14,7 +14,7 @@ import Link from "next/link";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Mossos AI Portal",
+  title: "Seguretat AI Portal",
   description: "Portal d'intel·ligència de dades de seguretat",
 };
 
@@ -23,11 +23,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ca">
       <body className={`${inter.className} bg-slate-50 text-slate-900`}>
         <div className="flex h-screen overflow-hidden">
-          {/* SIDEBAR FIXA */}
+          {/* SIDEBAR */}
           <aside className="w-64 bg-[#003366] text-white flex flex-col shadow-xl">
             <div className="p-6 flex items-center gap-3 border-b border-blue-800">
               <ShieldCheck className="text-blue-400 w-8 h-8" />
-              <span className="font-bold text-lg tracking-tight">Mossos Intel</span>
+              <span className="font-bold text-lg tracking-tight">Portal de Seguretat</span>
             </div>
             
             <nav className="flex-1 p-4 space-y-1">

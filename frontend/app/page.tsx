@@ -1,63 +1,56 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
-import { 
-  ShieldCheck, 
-  LayoutDashboard, 
-  MessageSquare, 
-  Search, 
-  BookOpen, 
-  Home as HomeIcon 
-} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { ArrowRight, Database, Bot, FileText } from "lucide-react";
 
-const inter = Inter({ subsets: ["latin"] });
-
-export const metadata: Metadata = {
-  title: "Mossos AI Portal",
-  description: "Portal d'intel·ligència de dades de seguretat",
-};
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function HomePage() {
   return (
-    <html lang="ca">
-      <body className={`${inter.className} bg-slate-50 text-slate-900`}>
-        <div className="flex h-screen overflow-hidden">
-          {/* SIDEBAR FIXA */}
-          <aside className="w-64 bg-[#003366] text-white flex flex-col shadow-xl">
-            <div className="p-6 flex items-center gap-3 border-b border-blue-800">
-              <ShieldCheck className="text-blue-400 w-8 h-8" />
-              <span className="font-bold text-lg tracking-tight">Mossos Intel</span>
-            </div>
-            
-            <nav className="flex-1 p-4 space-y-1">
-              <NavItem href="/" icon={<HomeIcon size={20}/>} label="Inici" />
-              <NavItem href="/dashboard" icon={<LayoutDashboard size={20}/>} label="Dashboard" />
-              <NavItem href="/explorer" icon={<Search size={20}/>} label="Explorador" />
-              <NavItem href="/chat" icon={<MessageSquare size={20}/>} label="AI Analyst" />
-              <NavItem href="/docs" icon={<BookOpen size={20}/>} label="Knowledge Base" />
-            </nav>
+    <div className="max-w-4xl space-y-8 animate-in fade-in duration-700">
+      <div className="space-y-4">
+        <h1 className="text-6xl font-extrabold tracking-tight text-slate-900">
+          {"Portal d'Anàlisi sobre "}
+          <span className="text-blue-600">{"seguretat a Catalunya"}</span>
+        </h1>
+        <p className="text-xl text-slate-600 leading-relaxed">
+          {"Sistema intel·ligent de gestió de dades de seguretat. Analitza fets delictius, "}
+          {"transport públic i dades d'odi mitjançant IA."}
+        </p>
+      </div>
 
-            <div className="p-4 border-t border-blue-800 text-[10px] text-blue-300 uppercase tracking-widest text-center">
-              TFG Enginyeria - 2026
-            </div>
-          </aside>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-8">
+        <FeatureCard 
+          icon={<Database className="text-blue-600" size={24} />}
+          title="Dades Obertes"
+          desc="Consulta dades oficials directament des de Supabase."
+        />
+        <FeatureCard 
+          icon={<Bot className="text-green-600" size={24} />}
+          title="IA SQL Agent"
+          desc="Parla amb les dades mitjançant llenguatge natural."
+        />
+        <FeatureCard 
+          icon={<FileText className="text-orange-600" size={24} />}
+          title="Base Documental"
+          desc="Properament: RAG amb articles i PDFs oficials."
+        />
+      </div>
 
-          {/* CONTINGUT DINÀMIC */}
-          <main className="flex-1 overflow-y-auto p-8 lg:p-12">
-            {children}
-          </main>
-        </div>
-      </body>
-    </html>
+      <div className="pt-8">
+        <Link href="/dashboard">
+          <Button size="lg" className="bg-blue-600 hover:bg-blue-700 h-14 px-8 text-lg gap-2">
+            {"Començar l'exploració"} <ArrowRight size={20} />
+          </Button>
+        </Link>
+      </div>
+    </div>
   );
 }
 
-function NavItem({ href, icon, label }: { href: string, icon: React.ReactNode, label: string }) {
+function FeatureCard({ icon, title, desc }: { icon: React.ReactNode, title: string, desc: string }) {
   return (
-    <Link href={href} className="flex items-center gap-3 p-3 rounded-lg hover:bg-blue-800/50 transition-all group">
-      <span className="text-blue-300 group-hover:text-white">{icon}</span>
-      <span className="font-medium">{label}</span>
-    </Link>
+    <div className="p-6 bg-white border rounded-2xl shadow-sm space-y-3 hover:border-blue-200 transition-colors">
+      <div className="p-3 bg-slate-50 w-fit rounded-xl">{icon}</div>
+      <h3 className="font-bold text-lg">{title}</h3>
+      <p className="text-slate-500 text-sm">{desc}</p>
+    </div>
   );
 }
