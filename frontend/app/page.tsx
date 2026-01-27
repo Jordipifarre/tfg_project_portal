@@ -1,65 +1,63 @@
-import Image from "next/image";
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { 
+  ShieldCheck, 
+  LayoutDashboard, 
+  MessageSquare, 
+  Search, 
+  BookOpen, 
+  Home as HomeIcon 
+} from "lucide-react";
+import Link from "next/link";
 
-export default function Home() {
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: "Mossos AI Portal",
+  description: "Portal d'intel·ligència de dades de seguretat",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <html lang="ca">
+      <body className={`${inter.className} bg-slate-50 text-slate-900`}>
+        <div className="flex h-screen overflow-hidden">
+          {/* SIDEBAR FIXA */}
+          <aside className="w-64 bg-[#003366] text-white flex flex-col shadow-xl">
+            <div className="p-6 flex items-center gap-3 border-b border-blue-800">
+              <ShieldCheck className="text-blue-400 w-8 h-8" />
+              <span className="font-bold text-lg tracking-tight">Mossos Intel</span>
+            </div>
+            
+            <nav className="flex-1 p-4 space-y-1">
+              <NavItem href="/" icon={<HomeIcon size={20}/>} label="Inici" />
+              <NavItem href="/dashboard" icon={<LayoutDashboard size={20}/>} label="Dashboard" />
+              <NavItem href="/explorer" icon={<Search size={20}/>} label="Explorador" />
+              <NavItem href="/chat" icon={<MessageSquare size={20}/>} label="AI Analyst" />
+              <NavItem href="/docs" icon={<BookOpen size={20}/>} label="Knowledge Base" />
+            </nav>
+
+            <div className="p-4 border-t border-blue-800 text-[10px] text-blue-300 uppercase tracking-widest text-center">
+              TFG Enginyeria - 2026
+            </div>
+          </aside>
+
+          {/* CONTINGUT DINÀMIC */}
+          <main className="flex-1 overflow-y-auto p-8 lg:p-12">
+            {children}
+          </main>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </body>
+    </html>
+  );
+}
+
+function NavItem({ href, icon, label }: { href: string, icon: React.ReactNode, label: string }) {
+  return (
+    <Link href={href} className="flex items-center gap-3 p-3 rounded-lg hover:bg-blue-800/50 transition-all group">
+      <span className="text-blue-300 group-hover:text-white">{icon}</span>
+      <span className="font-medium">{label}</span>
+    </Link>
   );
 }
