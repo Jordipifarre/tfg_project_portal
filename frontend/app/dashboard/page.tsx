@@ -18,7 +18,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Aeroports" value="1.048" icon={<Plane />} color="text-blue-600" />
+        <StatCard title="Aeroports" value="Pending" icon={<Plane />} color="text-blue-600" />
         <StatCard title="Transport Públic" value="Pending" icon={<Train />} color="text-green-600" />
         <StatCard title="Fets d'Odi" value="Pending" icon={<ShieldAlert />} color="text-red-600" />
         <StatCard title="Detencions" value="Pending" icon={<Users />} color="text-purple-600" />
@@ -34,7 +34,7 @@ export default function DashboardPage() {
   );
 }
 
-// Ara fem servir la interfície en lloc d'any
+
 function StatCard({ title, value, icon, color }: StatCardProps) {
   return (
     <Card className="hover:shadow-md transition-shadow">

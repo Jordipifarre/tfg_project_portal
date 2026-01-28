@@ -5,7 +5,7 @@ import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Send, Bot, Loader2 } from "lucide-react"; // 1. Eliminat 'User' que no es feia servir
+import { Send, Bot, Loader2 } from "lucide-react";
 
 export default function ChatPage() {
   const [message, setMessage] = useState("");
