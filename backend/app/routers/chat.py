@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from app.agents.chat_agent import get_ai_response
+from backend.app.agents.router_agent import get_ai_response
 from app.agents.sql_agent import query_database 
 
 router = APIRouter()

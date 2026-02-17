@@ -3,19 +3,18 @@ from langchain_community.agent_toolkits import create_sql_agent
 from langchain_ollama import ChatOllama
 from app.core.config import settings
 
-# 1. Connexió
+
 db_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
 db = SQLDatabase.from_uri(db_url)
 
-# 2. Model
+
 llm = ChatOllama(
     base_url=settings.OLLAMA_BASE_URL,
     model=settings.OLLAMA_MODEL,
     temperature=0,
 )
 
-# 3. Instruccions personalitzades per a l'agent
-# Això evita que l'IA es confongui amb les 3 files de mostra (sample rows)
+
 CUSTOM_PREFIX = """
 Ets un analista de dades expert en SQL. 
 IMPORTANT: Quan demanis el esquema d'una taula, veuràs 3 files de mostra. 
@@ -24,12 +23,12 @@ Per saber el nombre total de registres o fer càlculs, SEMPRE has d'executar una
 Respon sempre en català.
 """
 
-# 4. Agent
+
 sql_agent = create_sql_agent(
     llm=llm,
     db=db,
     agent_type="zero-shot-react-description",
-    prefix=CUSTOM_PREFIX, # Afegim les instruccions aquí
+    prefix=CUSTOM_PREFIX, 
     verbose=True,
     handle_parsing_errors=True
 )
@@ -37,7 +36,7 @@ sql_agent = create_sql_agent(
 def query_database(user_query: str) -> str:
     """Funció per consultar la base de dades."""
     try:
-        # Simplifiquem la crida perquè el prefix ja fa la feina
+        
         result = sql_agent.invoke({"input": user_query})
         return result["output"]
     except Exception as e:

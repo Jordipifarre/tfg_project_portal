@@ -4,22 +4,22 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react"; // 1. Eliminat ListFilter
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react"; 
 
-// Definim un tipus per a les files de la taula
+
 type TableRowData = Record<string, string | number | boolean | null>;
 
 export default function ExplorerPage() {
   const [tables, setTables] = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState("");
-  const [data, setData] = useState<TableRowData[]>([]); // 2. Canviat any[] per TableRowData[]
+  const [data, setData] = useState<TableRowData[]>([]); 
   const [columns, setColumns] = useState<string[]>([]);
   
-  // ESTATS DE CONTROL
+  
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRows, setTotalRows] = useState(0);
-  const pageSize = 20; // 3. Canviat a constant ja que no usem setPageSize de moment
+  const pageSize = 20; 
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
