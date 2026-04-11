@@ -20,7 +20,7 @@ export default function ChatPage() {
         message: message
       });
       setResponse(res.data.ai_analyst || res.data.answer);
-    } catch (_error) { // 2. Canviat 'error' per '_error' (el guionet indica que sabem que no la usem)
+    } catch (_error) { 
       setResponse("Error: El backend no respon. Revisa que 'uvicorn' estigui corrent.");
     }
     setLoading(false);

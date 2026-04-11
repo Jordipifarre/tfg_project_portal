@@ -8,7 +8,7 @@ router = APIRouter()
 async def get_tables():
     """Retorna la llista de taules disponibles."""
     try:
-        # Consulta per obtenir els noms de les taules a PostgreSQL
+       
         query = text("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public';")
         with db._engine.connect() as connection:
             result = connection.execute(query)
@@ -24,12 +24,11 @@ async def get_table_data(table_name: str, page: int = 1, page_size: int = 20):
         offset = (page - 1) * page_size
         
         with db._engine.connect() as connection:
-            # 1. Obtenir el total de files (per saber quantes pàgines hi haurà)
+            
             count_query = text(f"SELECT COUNT(*) FROM {table_name}")
             total_rows = connection.execute(count_query).scalar()
             
-            # 2. Obtenir les dades de la pàgina actual
-            # Fem servir LIMIT per la quantitat i OFFSET per saltar les pàgines anteriors
+            
             data_query = text(f"SELECT * FROM {table_name} LIMIT :limit OFFSET :offset")
             result = connection.execute(data_query, {"limit": page_size, "offset": offset})
             
