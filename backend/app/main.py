@@ -4,6 +4,7 @@ from app.services.database import supabase
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat
 from app.routers import data
+from app.routers import stats
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -21,6 +22,7 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/chat", tags=["IA Chat"])
 app.include_router(data.router, prefix="/data", tags=["Data Access"])
+app.include_router(stats.router, prefix="/data", tags=["Stats"])
 
 @app.get("/")
 async def root():

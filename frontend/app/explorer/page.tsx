@@ -1,132 +1,159 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import axios from "axios";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { fetchTables, fetchTableData } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react"; 
+import { Loader2, Database, Table2 } from "lucide-react";
+import { DynamicDataTable } from "@/components/tables/DynamicDataTable";
+import { ColumnDef } from "@tanstack/react-table";
 
-
-type TableRowData = Record<string, string | number | boolean | null>;
+const PAGE_SIZE = 50;
 
 export default function ExplorerPage() {
-  const [tables, setTables] = useState<string[]>([]);
+  const [tables, setTables]           = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState("");
-  const [data, setData] = useState<TableRowData[]>([]); 
-  const [columns, setColumns] = useState<string[]>([]);
-  
-  
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalRows, setTotalRows] = useState(0);
-  const pageSize = 20; 
-  const [loading, setLoading] = useState(false);
+  const [data, setData]               = useState<any[]>([]);
+  const [columns, setColumns]         = useState<string[]>([]);
+  const [page, setPage]               = useState(1);
+  const [totalPages, setTotalPages]   = useState(1);
+  const [totalRows, setTotalRows]     = useState(0);
+  const [loading, setLoading]         = useState(false);
+  const [globalFilter, setGlobalFilter] = useState("");
 
+  const { toast } = useToast();
+
+  /* Load table list once */
   useEffect(() => {
-    axios.get("http://127.0.0.1:8000/data/tables")
-      .then(res => setTables(res.data.tables))
-      .catch(err => console.error("Error carregant taules", err));
-  }, []);
+    fetchTables()
+      .then((res) => setTables(res.tables))
+      .catch(() =>
+        toast({ title: "Error de connexió", description: "No s'han pogut obtenir les taules.", variant: "destructive" })
+      );
+  }, [toast]);
 
-  const fetchTableData = async (tableName: string, pageNum: number) => {
-    setLoading(true);
-    try {
-      const res = await axios.get(`http://127.0.0.1:8000/data/tables/${tableName}`, {
-        params: { page: pageNum, page_size: pageSize }
-      });
-      
-      setData(res.data.data);
-      setColumns(res.data.columns);
-      setTotalPages(res.data.total_pages);
-      setTotalRows(res.data.total);
-      setPage(pageNum);
-      setSelectedTable(tableName);
-    } catch (error) {
-      console.error("Error carregant dades", error);
-    }
-    setLoading(false);
+  /* Fetch one page of data from the backend */
+  const loadPage = useCallback(
+    async (tableName: string, pageNum: number) => {
+      setLoading(true);
+      try {
+        const res = await fetchTableData(tableName, pageNum, PAGE_SIZE);
+        setData(res.data);
+        setColumns(res.columns);
+        setTotalPages(res.total_pages);
+        setTotalRows(res.total);
+        setPage(pageNum);
+        setGlobalFilter("");
+      } catch {
+        toast({ title: "Error de dades", description: "No s'han pogut obtenir els registres.", variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [toast]
+  );
+
+  const handleSelectTable = (tableName: string) => {
+    setSelectedTable(tableName);
+    loadPage(tableName, 1);
   };
 
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    loadPage(selectedTable, newPage);
+  };
+
+  /* Build TanStack column definitions from column names */
+  const tableColumns = useMemo<ColumnDef<any, any>[]>(
+    () =>
+      columns.map((col) => ({
+        accessorKey: col,
+        header: col.length > 40 ? col.slice(0, 38) + "…" : col,
+        enableSorting: true,
+      })),
+    [columns]
+  );
+
+  /* Pretty-print table name */
+  const prettyName = (t: string) =>
+    t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-end">
+    <div className="space-y-5 pb-10">
+      {/* Header */}
+      <div className="flex items-center gap-3 pb-2 border-b border-slate-800">
+        <div className="p-2 bg-slate-800 rounded-lg">
+          <Table2 size={18} className="text-slate-300" />
+        </div>
         <div>
-          <h1 className="text-3xl font-bold">Explorador de Dades</h1>
-          <p className="text-slate-500 text-sm">Consulta les taules de Supabase en temps real.</p>
+          <h1 className="text-xl font-bold text-slate-100">Data Explorer</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Navega directament les taules de Supabase — paginació al servidor, {PAGE_SIZE} files per pàgina.
+          </p>
         </div>
       </div>
 
+      {/* Table selector */}
       <div className="flex gap-2 flex-wrap">
-        {tables.map(t => (
-          <Button 
-            key={t} 
+        {tables.length === 0 && !loading && (
+          <p className="text-xs text-slate-500 bg-slate-800 px-3 py-2 rounded-lg">
+            Cap taula trobada. Assegura't que el backend està actiu.
+          </p>
+        )}
+        {tables.map((t) => (
+          <Button
+            key={t}
+            size="sm"
             variant={selectedTable === t ? "default" : "outline"}
-            onClick={() => fetchTableData(t, 1)}
-            className="capitalize"
+            onClick={() => handleSelectTable(t)}
+            className={
+              selectedTable === t
+                ? "bg-cyan-600 hover:bg-cyan-500 text-white border-0 text-xs h-8"
+                : "border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs h-8"
+            }
           >
-            {t.replace(/_/g, " ")}
+            <Database size={13} className="mr-1.5" />
+            {prettyName(t)}
           </Button>
         ))}
       </div>
 
-      {selectedTable && (
-        <div className="bg-white border rounded-xl shadow-sm overflow-hidden border-slate-200">
-          <div className="p-4 border-b bg-slate-50/50 flex justify-between items-center">
-            <div className="flex items-center gap-4 text-sm text-slate-500">
-              <span>Total: <b className="text-slate-900">{totalRows}</b> registres</span>
-              <span className="w-px h-4 bg-slate-300"></span>
-              <span>Pàgina <b>{page}</b> de <b>{totalPages}</b></span>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Button 
-                variant="outline" size="sm" 
-                disabled={page <= 1 || loading}
-                onClick={() => fetchTableData(selectedTable, page - 1)}
-              >
-                <ChevronLeft className="w-4 h-4 mr-1" /> Anterior
-              </Button>
-              <Button 
-                variant="outline" size="sm" 
-                disabled={page >= totalPages || loading}
-                onClick={() => fetchTableData(selectedTable, page + 1)}
-              >
-                Següent <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
-            </div>
+      {/* Content area */}
+      {loading ? (
+        <div className="py-28 flex flex-col items-center gap-4 bg-slate-900/40 border border-slate-800 rounded-xl">
+          <Loader2 className="animate-spin text-cyan-400 w-8 h-8" />
+          <p className="text-slate-400 text-sm">Sincronitzant amb Postgres…</p>
+        </div>
+      ) : selectedTable ? (
+        <>
+          {/* Stats bar */}
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            <span className="font-medium text-slate-300">{prettyName(selectedTable)}</span>
+            <span>·</span>
+            <span>{totalRows.toLocaleString()} files totals</span>
+            <span>·</span>
+            <span>{columns.length} columnes</span>
+            <span>·</span>
+            <span>Pàgina {page} de {totalPages}</span>
           </div>
 
-          <div className="relative overflow-x-auto max-h-[600px]">
-            {loading ? (
-               <div className="p-32 flex flex-col items-center gap-2">
-                 <Loader2 className="animate-spin text-blue-600 w-8 h-8" />
-                 <p className="text-slate-400 text-sm font-medium">Sincronitzant amb la DB...</p>
-               </div>
-            ) : (
-              <Table>
-                <TableHeader className="bg-slate-50 sticky top-0 z-10">
-                  <TableRow>
-                    {columns.map(col => (
-                      <TableHead key={col} className="font-bold text-slate-700 uppercase text-[10px] tracking-widest">
-                        {col.replace(/_/g, " ")}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.map((row, i) => (
-                    <TableRow key={i} className="hover:bg-slate-50 transition-colors">
-                      {columns.map(col => (
-                        <TableCell key={col} className="text-sm py-3 text-slate-600">
-                          {row[col]?.toString() || "-"}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </div>
+          <DynamicDataTable
+            columns={tableColumns}
+            data={data}
+            globalFilter={globalFilter}
+            setGlobalFilter={setGlobalFilter}
+            serverPagination={{
+              page,
+              totalPages,
+              totalRows,
+              onPageChange: handlePageChange,
+            }}
+          />
+        </>
+      ) : (
+        <div className="py-24 text-center border border-dashed border-slate-800 rounded-xl">
+          <Database size={32} className="mx-auto text-slate-700 mb-3" />
+          <p className="text-slate-500 text-sm">Selecciona una taula per veure les dades.</p>
         </div>
       )}
     </div>
