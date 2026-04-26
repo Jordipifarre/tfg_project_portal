@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI
 from app.core.config import settings
 from app.services.database import supabase
@@ -5,6 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat
 from app.routers import data
 from app.routers import stats
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

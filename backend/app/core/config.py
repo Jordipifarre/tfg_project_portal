@@ -15,7 +15,13 @@ class Settings(BaseSettings):
 
     # --- IA (OLLAMA) ---
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "qwen2.5-coder:7b"
+    OLLAMA_MODEL: str = "qwen2.5-coder:3b"
+
+    # --- Dynamic model routing ---
+    OLLAMA_ROUTER_MODEL: str = "qwen2.5-coder:3b"
+    OLLAMA_SQL_MODEL: str = "qwen2.5-coder:7b"
+    OLLAMA_RAG_MODEL: str = "qwen2.5-coder:3b"
+    ENABLE_DYNAMIC_ROUTING: bool = True
 
     # Pydantic Settings Config
     model_config = SettingsConfigDict(

@@ -11,19 +11,18 @@ import { ColumnDef } from "@tanstack/react-table";
 const PAGE_SIZE = 50;
 
 export default function ExplorerPage() {
-  const [tables, setTables]           = useState<string[]>([]);
+  const [tables, setTables]             = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState("");
-  const [data, setData]               = useState<any[]>([]);
-  const [columns, setColumns]         = useState<string[]>([]);
-  const [page, setPage]               = useState(1);
-  const [totalPages, setTotalPages]   = useState(1);
-  const [totalRows, setTotalRows]     = useState(0);
-  const [loading, setLoading]         = useState(false);
+  const [data, setData]                 = useState<any[]>([]);
+  const [columns, setColumns]           = useState<string[]>([]);
+  const [page, setPage]                 = useState(1);
+  const [totalPages, setTotalPages]     = useState(1);
+  const [totalRows, setTotalRows]       = useState(0);
+  const [loading, setLoading]           = useState(false);
   const [globalFilter, setGlobalFilter] = useState("");
 
   const { toast } = useToast();
 
-  /* Load table list once */
   useEffect(() => {
     fetchTables()
       .then((res) => setTables(res.tables))
@@ -32,7 +31,6 @@ export default function ExplorerPage() {
       );
   }, [toast]);
 
-  /* Fetch one page of data from the backend */
   const loadPage = useCallback(
     async (tableName: string, pageNum: number) => {
       setLoading(true);
@@ -63,7 +61,6 @@ export default function ExplorerPage() {
     loadPage(selectedTable, newPage);
   };
 
-  /* Build TanStack column definitions from column names */
   const tableColumns = useMemo<ColumnDef<any, any>[]>(
     () =>
       columns.map((col) => ({
@@ -74,20 +71,19 @@ export default function ExplorerPage() {
     [columns]
   );
 
-  /* Pretty-print table name */
   const prettyName = (t: string) =>
     t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
     <div className="space-y-5 pb-10">
       {/* Header */}
-      <div className="flex items-center gap-3 pb-2 border-b border-slate-800">
-        <div className="p-2 bg-slate-800 rounded-lg">
-          <Table2 size={18} className="text-slate-300" />
+      <div className="flex items-center gap-3 pb-4 border-b border-[#e5e5e5]">
+        <div className="p-2 bg-[#1a3a52]/10 rounded-lg">
+          <Table2 size={18} className="text-[#1a3a52]" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-slate-100">Data Explorer</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h1 className="text-xl font-bold text-[#1f2937]">Data Explorer</h1>
+          <p className="text-xs text-[#6b7280] mt-0.5">
             Navega directament les taules de Supabase — paginació al servidor, {PAGE_SIZE} files per pàgina.
           </p>
         </div>
@@ -96,8 +92,8 @@ export default function ExplorerPage() {
       {/* Table selector */}
       <div className="flex gap-2 flex-wrap">
         {tables.length === 0 && !loading && (
-          <p className="text-xs text-slate-500 bg-slate-800 px-3 py-2 rounded-lg">
-            Cap taula trobada. Assegura't que el backend està actiu.
+          <p className="text-xs text-[#6b7280] bg-white border border-[#e5e5e5] px-3 py-2 rounded-lg">
+            Cap taula trobada. Assegura&apos;t que el backend està actiu.
           </p>
         )}
         {tables.map((t) => (
@@ -108,8 +104,8 @@ export default function ExplorerPage() {
             onClick={() => handleSelectTable(t)}
             className={
               selectedTable === t
-                ? "bg-cyan-600 hover:bg-cyan-500 text-white border-0 text-xs h-8"
-                : "border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs h-8"
+                ? "bg-[#1a3a52] hover:bg-[#0f2d42] text-white border-0 text-xs h-8"
+                : "border-[#e5e5e5] bg-white hover:bg-gray-50 text-[#475569] text-xs h-8"
             }
           >
             <Database size={13} className="mr-1.5" />
@@ -120,15 +116,15 @@ export default function ExplorerPage() {
 
       {/* Content area */}
       {loading ? (
-        <div className="py-28 flex flex-col items-center gap-4 bg-slate-900/40 border border-slate-800 rounded-xl">
-          <Loader2 className="animate-spin text-cyan-400 w-8 h-8" />
-          <p className="text-slate-400 text-sm">Sincronitzant amb Postgres…</p>
+        <div className="py-28 flex flex-col items-center gap-4 bg-white border border-[#e5e5e5] rounded-lg shadow-sm">
+          <Loader2 className="animate-spin text-[#1a3a52] w-8 h-8" />
+          <p className="text-[#6b7280] text-sm">Sincronitzant amb Postgres…</p>
         </div>
       ) : selectedTable ? (
         <>
           {/* Stats bar */}
-          <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span className="font-medium text-slate-300">{prettyName(selectedTable)}</span>
+          <div className="flex items-center gap-3 text-xs text-[#6b7280]">
+            <span className="font-semibold text-[#1f2937]">{prettyName(selectedTable)}</span>
             <span>·</span>
             <span>{totalRows.toLocaleString()} files totals</span>
             <span>·</span>
@@ -151,9 +147,9 @@ export default function ExplorerPage() {
           />
         </>
       ) : (
-        <div className="py-24 text-center border border-dashed border-slate-800 rounded-xl">
-          <Database size={32} className="mx-auto text-slate-700 mb-3" />
-          <p className="text-slate-500 text-sm">Selecciona una taula per veure les dades.</p>
+        <div className="py-24 text-center border border-dashed border-[#e5e5e5] rounded-lg bg-white">
+          <Database size={32} className="mx-auto text-[#d1d5db] mb-3" />
+          <p className="text-[#6b7280] text-sm">Selecciona una taula per veure les dades.</p>
         </div>
       )}
     </div>

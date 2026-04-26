@@ -24,7 +24,6 @@ import {
 /* ── Props ───────────────────────────────────────────────────────────────── */
 
 interface ServerPagination {
-  /** 1-based current page */
   page: number;
   totalPages: number;
   totalRows: number;
@@ -34,10 +33,8 @@ interface ServerPagination {
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
-  /** Local filter text (operates on the current page only in server mode) */
   globalFilter: string;
   setGlobalFilter: (val: string) => void;
-  /** When provided the table delegates pagination to the server */
   serverPagination?: ServerPagination;
 }
 
@@ -58,7 +55,6 @@ export function DynamicDataTable<TData, TValue>({
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    // Pagination is always manual when serverPagination is supplied
     manualPagination: !!serverPagination,
     pageCount: serverPagination ? serverPagination.totalPages : undefined,
     state: { globalFilter, sorting },
@@ -66,7 +62,6 @@ export function DynamicDataTable<TData, TValue>({
     onGlobalFilterChange: setGlobalFilter,
   });
 
-  /* CSV export — exports the rows currently visible (current server page) */
   const exportToCSV = () => {
     const rows = table.getRowModel().rows;
     if (rows.length === 0) return;
@@ -91,7 +86,6 @@ export function DynamicDataTable<TData, TValue>({
     URL.revokeObjectURL(url);
   };
 
-  /* Pagination helpers */
   const sp = serverPagination;
   const currentPage = sp ? sp.page : table.getState().pagination.pageIndex + 1;
   const pageCount   = sp ? sp.totalPages : (table.getPageCount() || 1);
@@ -112,16 +106,16 @@ export function DynamicDataTable<TData, TValue>({
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 h-4 w-4" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9ca3af] h-4 w-4" />
           <Input
             placeholder={sp ? "Cerca a la pàgina actual…" : "Cerca totes les columnes…"}
             value={globalFilter ?? ""}
             onChange={(e) => setGlobalFilter(e.target.value)}
-            className="pl-9 h-9 bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-500 focus-visible:ring-cyan-600/40"
+            className="pl-9 h-9 bg-white border-[#e5e5e5] text-[#1f2937] placeholder:text-[#9ca3af] focus-visible:ring-[#1a3a52]/20 focus-visible:border-[#1a3a52]/40"
           />
         </div>
         {sp && (
-          <span className="text-xs text-slate-500 hidden sm:block">
+          <span className="text-xs text-[#9ca3af] hidden sm:block">
             La cerca opera sobre la pàgina actual. Usa el SQL Chat per a cerques globals.
           </span>
         )}
@@ -129,36 +123,36 @@ export function DynamicDataTable<TData, TValue>({
           variant="outline"
           size="sm"
           onClick={exportToCSV}
-          className="gap-1.5 border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs h-9"
+          className="gap-1.5 border-[#e5e5e5] bg-white hover:bg-gray-50 text-[#475569] text-xs h-9 shadow-none"
         >
           <Download size={14} /> Exporta CSV
         </Button>
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+      <div className="rounded-lg border border-[#e5e5e5] bg-white overflow-hidden shadow-sm">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
-              <TableRow key={hg.id} className="border-slate-800 hover:bg-transparent">
+              <TableRow key={hg.id} className="border-[#e5e5e5] hover:bg-transparent">
                 {hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   return (
                     <TableHead
                       key={header.id}
-                      className="text-slate-400 text-xs font-semibold uppercase tracking-wide px-4 py-3 bg-slate-950/60 whitespace-nowrap"
+                      className="text-[#ffffff] text-xs font-semibold uppercase tracking-wide px-4 py-3 bg-[#1a3a52] whitespace-nowrap"
                     >
                       {header.isPlaceholder ? null : (
                         <button
-                          className={`flex items-center gap-1 ${canSort ? "cursor-pointer hover:text-slate-200" : ""}`}
+                          className={`flex items-center gap-1 ${canSort ? "cursor-pointer hover:text-white/80" : ""}`}
                           onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
                           {canSort && (
                             <ArrowUpDown size={12} className={
                               header.column.getIsSorted()
-                                ? "text-cyan-400"
-                                : "text-slate-600"
+                                ? "text-[#d97706]"
+                                : "text-white/40"
                             } />
                           )}
                         </button>
@@ -171,15 +165,15 @@ export function DynamicDataTable<TData, TValue>({
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows.length > 0 ? (
-              table.getRowModel().rows.map((row) => (
+              table.getRowModel().rows.map((row, rowIndex) => (
                 <TableRow
                   key={row.id}
-                  className="border-slate-800 hover:bg-slate-800/40 transition-colors"
+                  className={`border-[#e5e5e5] hover:bg-[#1a3a52]/5 transition-colors ${rowIndex % 2 === 0 ? "bg-white" : "bg-[#f5f5f5]"}`}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
-                      className="px-4 py-2.5 text-sm text-slate-300 max-w-[220px] truncate"
+                      className="px-4 py-2.5 text-sm text-[#1f2937] max-w-[220px] truncate"
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
@@ -190,7 +184,7 @@ export function DynamicDataTable<TData, TValue>({
               <TableRow>
                 <TableCell
                   colSpan={columns.length}
-                  className="h-32 text-center text-slate-500 text-sm"
+                  className="h-32 text-center text-[#9ca3af] text-sm"
                 >
                   Sense resultats.
                 </TableCell>
@@ -202,13 +196,13 @@ export function DynamicDataTable<TData, TValue>({
 
       {/* Pagination bar */}
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs text-slate-500">{rowLabel}</p>
+        <p className="text-xs text-[#6b7280]">{rowLabel}</p>
 
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
             size="icon"
-            className="h-7 w-7 border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-30"
+            className="h-7 w-7 border-[#e5e5e5] bg-white hover:bg-gray-50 text-[#475569] disabled:opacity-30 shadow-none"
             onClick={goFirst}
             disabled={!canPrev}
             title="Primera pàgina"
@@ -218,7 +212,7 @@ export function DynamicDataTable<TData, TValue>({
           <Button
             variant="outline"
             size="icon"
-            className="h-7 w-7 border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-30"
+            className="h-7 w-7 border-[#e5e5e5] bg-white hover:bg-gray-50 text-[#475569] disabled:opacity-30 shadow-none"
             onClick={goPrev}
             disabled={!canPrev}
             title="Pàgina anterior"
@@ -226,14 +220,14 @@ export function DynamicDataTable<TData, TValue>({
             <ChevronLeft size={14} />
           </Button>
 
-          <span className="text-xs text-slate-400 px-3 tabular-nums">
+          <span className="text-xs text-[#6b7280] px-3 tabular-nums">
             {currentPage.toLocaleString()} / {pageCount.toLocaleString()}
           </span>
 
           <Button
             variant="outline"
             size="icon"
-            className="h-7 w-7 border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-30"
+            className="h-7 w-7 border-[#e5e5e5] bg-white hover:bg-gray-50 text-[#475569] disabled:opacity-30 shadow-none"
             onClick={goNext}
             disabled={!canNext}
             title="Pàgina següent"
@@ -243,7 +237,7 @@ export function DynamicDataTable<TData, TValue>({
           <Button
             variant="outline"
             size="icon"
-            className="h-7 w-7 border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-30"
+            className="h-7 w-7 border-[#e5e5e5] bg-white hover:bg-gray-50 text-[#475569] disabled:opacity-30 shadow-none"
             onClick={goLast}
             disabled={!canNext}
             title="Última pàgina"

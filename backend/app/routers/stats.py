@@ -1,3 +1,4 @@
+import unicodedata
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 from app.agents.sql_agent import db
@@ -31,11 +32,20 @@ def _find_table(tables: list[str], *keywords: str) -> str | None:
     return None
 
 
+def _strip_accents(s: str) -> str:
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', s)
+        if unicodedata.category(c) != 'Mn'
+    )
+
+
 def _find_col(cols: list[str], *keywords: str) -> str | None:
+    """Find the first column whose name contains any keyword.
+    Comparison is accent-insensitive so 'ictim' matches 'víctimes'."""
     for kw in keywords:
-        kw_l = kw.lower()
+        kw_norm = _strip_accents(kw).lower()
         for c in cols:
-            if kw_l in c.lower():
+            if kw_norm in _strip_accents(c).lower():
                 return c
     return None
 
@@ -374,8 +384,8 @@ async def transport_stats():
             trend: list = []
             if yc and active_modes:
                 cast_parts = [
-                    f"CASE WHEN {_q(v)}::text ~ '^[0-9]+(\\.[0-9]+)?$'"
-                    f" THEN CAST({_q(v)}::text AS NUMERIC) ELSE 0 END AS {k}"
+                    f"SUM(CASE WHEN {_q(v)}::text ~ '^[0-9]+(\\.[0-9]+)?$'"
+                    f" THEN CAST({_q(v)}::text AS NUMERIC) ELSE 0 END) AS {k}"
                     for k, v in active_modes.items()
                 ]
                 r = conn.execute(text(
