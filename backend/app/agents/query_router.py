@@ -1,7 +1,7 @@
 import logging
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
-from app.agents.sql_agent import query_database
+from app.agents.sql_converter import query_database
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

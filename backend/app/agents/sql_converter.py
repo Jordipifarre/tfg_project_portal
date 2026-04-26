@@ -238,14 +238,14 @@ def _fix_column_names(sql: str) -> str:
             return f'"{ident}"'
         corrected = _best_column_match(ident, real_cols_lower)
         if corrected and corrected != ident:
-            print(f"[SQL-AGENT] COLUMN CORRECTION: '{ident}' → '{corrected}'")
+            print(f"[SQL-CONV] COLUMN CORRECTION: '{ident}' → '{corrected}'")
             logger.info("Column correction: '%s' → '%s'", ident, corrected)
             return f'"{corrected}"'
         return f'"{ident}"'
 
     fixed = _QUOTED_IDENT_RE.sub(_replace, sql)
     if fixed != sql:
-        print(f"[SQL-AGENT] AFTER COLUMN FIX: {fixed}")
+        print(f"[SQL-CONV] AFTER COLUMN FIX: {fixed}")
     return fixed
 
 
@@ -303,15 +303,15 @@ def _fix_filter_values(sql: str) -> str:
             # Exact value found but column should use ILIKE for robustness
             new_filter = f'"{col}" ILIKE \'%%{clean_val}%%\''
             if new_filter != m.group(0):
-                print(f"[SQL-AGENT] VALUE→ILIKE: \"{col}\" = '{val}' → ILIKE '%%{clean_val}%%'")
+                print(f"[SQL-CONV] VALUE→ILIKE: \"{col}\" = '{val}' → ILIKE '%%{clean_val}%%'")
             return new_filter
 
         # No exact match — try substring match against samples
         partial_match = next((s for s in col_samples if val_lower in s.lower() or s.lower() in val_lower), None)
         if partial_match:
-            print(f"[SQL-AGENT] VALUE FIX: \"{col}\" '{val}' → ILIKE '%%{clean_val}%%' (sample: '{partial_match}')")
+            print(f"[SQL-CONV] VALUE FIX: \"{col}\" '{val}' → ILIKE '%%{clean_val}%%' (sample: '{partial_match}')")
         else:
-            print(f"[SQL-AGENT] VALUE WARN: \"{col}\" '{val}' has no sample match — using ILIKE")
+            print(f"[SQL-CONV] VALUE WARN: \"{col}\" '{val}' has no sample match — using ILIKE")
         return f'"{col}" ILIKE \'%%{clean_val}%%\''
 
     fixed = _FILTER_RE.sub(_replace_filter, sql)
@@ -323,35 +323,35 @@ def _fix_filter_values(sql: str) -> str:
 def _generate_sql(user_query: str, llm: ChatOllama) -> str | None:
     system_prompt = _make_sql_system_prompt()
     print("\n" + "="*60)
-    print("[SQL-AGENT] SCHEMA SENT TO LLM:")
+    print("[SQL-CONV] SCHEMA SENT TO LLM:")
     print(_schema_string())
     print("="*60)
-    print(f"[SQL-AGENT] USER QUERY: {user_query}")
+    print(f"[SQL-CONV] USER QUERY: {user_query}")
     print("="*60 + "\n")
 
     msgs = [SystemMessage(content=system_prompt), HumanMessage(content=user_query)]
     try:
-        print("[SQL-AGENT] Calling LLM for SQL generation...")
+        print("[SQL-CONV] Calling LLM for SQL generation...")
         raw = llm.invoke(msgs).content
-        print(f"[SQL-AGENT] RAW LLM OUTPUT:\n{raw}\n")
+        print(f"[SQL-CONV] RAW LLM OUTPUT:\n{raw}\n")
         logger.info("SQL gen raw output: %s", raw)
 
         sql = _extract_sql(raw)
-        print(f"[SQL-AGENT] EXTRACTED SQL: {sql}")
+        print(f"[SQL-CONV] EXTRACTED SQL: {sql}")
 
         if sql:
             sql = _sanitize_sql(sql)
-            print(f"[SQL-AGENT] AFTER SANITIZE:  {sql}")
+            print(f"[SQL-CONV] AFTER SANITIZE:  {sql}")
             sql = _fix_column_names(sql)
-            print(f"[SQL-AGENT] AFTER COL FIX:   {sql}")
+            print(f"[SQL-CONV] AFTER COL FIX:   {sql}")
             sql = _fix_filter_values(sql)
-            print(f"[SQL-AGENT] FINAL SQL:        {sql}\n")
+            print(f"[SQL-CONV] FINAL SQL:        {sql}\n")
             logger.info("Final SQL: %s", sql)
         else:
-            print("[SQL-AGENT] WARNING: Could not extract SQL from LLM output\n")
+            print("[SQL-CONV] WARNING: Could not extract SQL from LLM output\n")
         return sql
     except Exception as e:
-        print(f"[SQL-AGENT] ERROR generating SQL: {e}")
+        print(f"[SQL-CONV] ERROR generating SQL: {e}")
         logger.error("SQL generation failed: %s", e)
         return None
 
@@ -402,18 +402,18 @@ def _execute_sql(sql: str) -> list[dict]:
             norm_map[_normalize(col)] = col
 
     for attempt in range(3):
-        print(f"[SQL-AGENT] EXECUTING SQL (attempt {attempt + 1}):\n  {sql}\n")
+        print(f"[SQL-CONV] EXECUTING SQL (attempt {attempt + 1}):\n  {sql}\n")
         try:
             with db._engine.connect() as conn:
                 result = conn.execute(text(sql))
                 keys = list(result.keys())
                 rows = result.fetchmany(_MAX_ROWS)
                 dicts = [dict(zip(keys, row)) for row in rows]
-                print(f"[SQL-AGENT] ROWS RETURNED: {len(dicts)}")
+                print(f"[SQL-CONV] ROWS RETURNED: {len(dicts)}")
                 if dicts:
-                    print(f"[SQL-AGENT] FIRST ROW SAMPLE: {dicts[0]}")
+                    print(f"[SQL-CONV] FIRST ROW SAMPLE: {dicts[0]}")
                 else:
-                    print("[SQL-AGENT] WARNING: Query returned 0 rows")
+                    print("[SQL-CONV] WARNING: Query returned 0 rows")
                 print()
                 return dicts
         except Exception as e:
@@ -449,14 +449,14 @@ def _execute_sql(sql: str) -> list[dict]:
                 if is_alias:
                     rewritten = _wrap_alias_case_as_subquery(sql)
                     if rewritten != sql:
-                        print(f"[SQL-AGENT] ALIAS REWRITE: '{bad_col}' is a SELECT alias → wrapping in subquery")
+                        print(f"[SQL-CONV] ALIAS REWRITE: '{bad_col}' is a SELECT alias → wrapping in subquery")
                         logger.info("Alias reference rewrite triggered by '%s'", bad_col)
                         sql = rewritten
                         continue  # retry with the rewritten SQL
-                print(f"[SQL-AGENT] RETRY FAILED: '{bad_col}' is neither a column nor rewritable alias")
+                print(f"[SQL-CONV] RETRY FAILED: '{bad_col}' is neither a column nor rewritable alias")
                 raise
 
-            print(f"[SQL-AGENT] RETRY {attempt + 1}: '{bad_col}' → '{real}'")
+            print(f"[SQL-CONV] RETRY {attempt + 1}: '{bad_col}' → '{real}'")
             logger.info("Column retry correction: '%s' → '%s'", bad_col, real)
 
             # Replace the bad identifier (quoted or unquoted) with the real name
@@ -481,15 +481,15 @@ Si hi ha diverses files, fes un resum concís. No mostris SQL ni tècnics detall
 
 def _summarize(user_query: str, rows: list[dict], llm: ChatOllama) -> str:
     result_text = json.dumps(rows, ensure_ascii=False, default=str)
-    print(f"[SQL-AGENT] SUMMARIZING {len(rows)} rows")
-    print(f"[SQL-AGENT] RAW RESULT SENT TO SUMMARIZER:\n{result_text[:500]}\n")
+    print(f"[SQL-CONV] SUMMARIZING {len(rows)} rows")
+    print(f"[SQL-CONV] RAW RESULT SENT TO SUMMARIZER:\n{result_text[:500]}\n")
     content = f"Pregunta: {user_query}\n\nResultat:\n{result_text}"
     try:
         answer = llm.invoke([
             SystemMessage(content=_SUMMARIZE_SYSTEM),
             HumanMessage(content=content),
         ]).content.strip()
-        print(f"[SQL-AGENT] FINAL ANSWER:\n{answer}\n")
+        print(f"[SQL-CONV] FINAL ANSWER:\n{answer}\n")
         return answer
     except Exception as e:
         logger.error("Summarize failed: %s", e)
@@ -503,9 +503,9 @@ def _summarize(user_query: str, rows: list[dict], llm: ChatOllama) -> str:
 def query_database(user_query: str, model: str | None = None) -> str:
     effective_model = model or settings.OLLAMA_SQL_MODEL
     print(f"\n{'#'*60}")
-    print(f"[SQL-AGENT] query_database() called")
-    print(f"[SQL-AGENT] Model: {effective_model}")
-    print(f"[SQL-AGENT] Query: {user_query}")
+    print(f"[SQL-CONV] query_database() called")
+    print(f"[SQL-CONV] Model: {effective_model}")
+    print(f"[SQL-CONV] Query: {user_query}")
     print(f"{'#'*60}\n")
 
     llm = ChatOllama(
@@ -516,22 +516,22 @@ def query_database(user_query: str, model: str | None = None) -> str:
 
     sql = _generate_sql(user_query, llm)
     if not sql:
-        print("[SQL-AGENT] FAILED: no SQL extracted from LLM output")
+        print("[SQL-CONV] FAILED: no SQL extracted from LLM output")
         return "No he pogut generar una consulta per a aquesta pregunta. Podries reformular-la amb més detall?"
 
     if sql.strip() == "SELECT 'no_data'":
-        print("[SQL-AGENT] LLM signaled no matching table")
+        print("[SQL-CONV] LLM signaled no matching table")
         return "No tinc dades relacionades amb aquesta pregunta a la base de dades disponible."
 
     try:
         rows = _execute_sql(sql)
     except Exception as e:
-        print(f"[SQL-AGENT] SQL EXECUTION ERROR: {e}")
+        print(f"[SQL-CONV] SQL EXECUTION ERROR: {e}")
         logger.error("SQL exec error: %s | SQL: %s", e, sql)
         return "No he pogut obtenir les dades per a aquesta pregunta. Podries reformular-la amb altres paraules?"
 
     if not rows:
-        print("[SQL-AGENT] 0 rows — returning empty result message")
+        print("[SQL-CONV] 0 rows — returning empty result message")
         return "No he trobat cap registre que coincideixi amb els filtres de la teva pregunta. Prova amb un any diferent, una altra localitat o sense algun filtre específic."
 
     return _summarize(user_query, rows, llm)
