@@ -19,9 +19,10 @@ const dashboardChildren = [
 
 interface SidebarNavProps {
   collapsed?: boolean;
+  onNavigate?: () => void;
 }
 
-export function SidebarNav({ collapsed = false }: SidebarNavProps) {
+export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
   const pathname = usePathname();
   const isDashboard = pathname.startsWith("/dashboard");
   const [dashOpen, setDashOpen] = useState(isDashboard);
@@ -34,8 +35,8 @@ export function SidebarNav({ collapsed = false }: SidebarNavProps) {
   if (collapsed) {
     return (
       <nav className="flex-1 flex flex-col items-center py-3 gap-1 overflow-y-auto">
-        <CollapseNavIcon href="/" icon={<Home size={18} />} active={pathname === "/"} title="Home" />
-        <CollapseNavIcon href="/dashboard" icon={<LayoutDashboard size={18} />} active={isDashboard} title="Dashboard" />
+        <CollapseNavIcon href="/" icon={<Home size={18} />} active={pathname === "/"} title="Home" onClick={onNavigate} />
+        <CollapseNavIcon href="/dashboard" icon={<LayoutDashboard size={18} />} active={isDashboard} title="Dashboard" onClick={onNavigate} />
         {isDashboard && (
           <div className="flex flex-col items-center gap-1 mt-0.5 mb-1">
             {dashboardChildren.slice(1).map((item) => (
@@ -46,19 +47,20 @@ export function SidebarNav({ collapsed = false }: SidebarNavProps) {
                 active={isActive(item.href, item.exact)}
                 title={item.label}
                 small
+                onClick={onNavigate}
               />
             ))}
           </div>
         )}
-        <CollapseNavIcon href="/explorer" icon={<Database size={18} />} active={pathname.startsWith("/explorer")} title="Data Explorer" />
-        <CollapseNavIcon href="/chat" icon={<MessageSquare size={18} />} active={pathname.startsWith("/chat")} title="Smart Chat" />
+        <CollapseNavIcon href="/explorer" icon={<Database size={18} />} active={pathname.startsWith("/explorer")} title="Data Explorer" onClick={onNavigate} />
+        <CollapseNavIcon href="/chat" icon={<MessageSquare size={18} />} active={pathname.startsWith("/chat")} title="Smart Chat" onClick={onNavigate} />
       </nav>
     );
   }
 
   return (
     <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-      <NavLink href="/" icon={<Home size={16} />} label="Home" active={pathname === "/"} />
+      <NavLink href="/" icon={<Home size={16} />} label="Home" active={pathname === "/"} onClick={onNavigate} />
 
       {/* Dashboard group */}
       <div>
@@ -89,6 +91,7 @@ export function SidebarNav({ collapsed = false }: SidebarNavProps) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={onNavigate}
                   className={cn(
                     "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
                     active
@@ -108,18 +111,19 @@ export function SidebarNav({ collapsed = false }: SidebarNavProps) {
         )}
       </div>
 
-      <NavLink href="/explorer" icon={<Database size={16} />} label="Data Explorer" active={pathname.startsWith("/explorer")} />
-      <NavLink href="/chat" icon={<MessageSquare size={16} />} label="Smart Chat" active={pathname.startsWith("/chat")} />
+      <NavLink href="/explorer" icon={<Database size={16} />} label="Data Explorer" active={pathname.startsWith("/explorer")} onClick={onNavigate} />
+      <NavLink href="/chat" icon={<MessageSquare size={16} />} label="Smart Chat" active={pathname.startsWith("/chat")} onClick={onNavigate} />
     </nav>
   );
 }
 
-function NavLink({ href, icon, label, active }: {
-  href: string; icon: React.ReactNode; label: string; active: boolean;
+function NavLink({ href, icon, label, active, onClick }: {
+  href: string; icon: React.ReactNode; label: string; active: boolean; onClick?: () => void;
 }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       className={cn(
         "flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
         active
@@ -133,13 +137,14 @@ function NavLink({ href, icon, label, active }: {
   );
 }
 
-function CollapseNavIcon({ href, icon, active, title, small = false }: {
-  href: string; icon: React.ReactNode; active: boolean; title: string; small?: boolean;
+function CollapseNavIcon({ href, icon, active, title, small = false, onClick }: {
+  href: string; icon: React.ReactNode; active: boolean; title: string; small?: boolean; onClick?: () => void;
 }) {
   return (
     <Link
       href={href}
       title={title}
+      onClick={onClick}
       className={cn(
         "flex items-center justify-center rounded-lg transition-all",
         small ? "w-7 h-7" : "w-9 h-9",

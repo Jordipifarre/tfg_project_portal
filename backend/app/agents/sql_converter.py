@@ -15,7 +15,7 @@ db_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://"
 db = SQLDatabase.from_uri(db_url)
 
 _MAX_ROWS = 50
-_SAMPLE_VALUES = 10   # distinct values to fetch per column for the prompt
+_SAMPLE_VALUES = 10
 _SCHEMA_CACHE: dict[str, dict] = {}
 
 # ---------------------------------------------------------------------------
@@ -60,9 +60,117 @@ def _get_schema() -> dict[str, dict]:
     return _SCHEMA_CACHE
 
 
-def _schema_string() -> str:
+# ---------------------------------------------------------------------------
+# Adaptive table selection — weighted keyword scoring
+# ---------------------------------------------------------------------------
+#
+# IMPORTANT — WHY WE USE WORD-BOUNDARY MATCHING:
+#   Substring matching caused "vol" (airport keyword) to match inside
+#   "evolució", scoring fets_aeroports=3 on every trend query.
+#   All lookups now use _kw_in_text() which checks for whole-word matches
+#   using Unicode-aware word boundaries (\b doesn't work with accented chars).
+#
+# WHY WEIGHTS:
+#   Topic-specific terms score 3 so they always beat generic terms (score 1).
+#   City names are NOT keywords — they appear in queries about any table.
+#
+# Structure: {table: {keyword: weight}}
+_TABLE_KEYWORDS: dict[str, dict[str, int]] = {
+    "fets_penals_detencions": {
+        "penal": 3, "penals": 3, "detencions": 3, "detenció": 3,
+        "arrest": 3, "arrests": 3, "crim": 3, "crims": 3,
+        "delicte": 3, "delictes": 3, "robatori": 3, "robatoris": 3,
+        "furt": 3, "furts": 3, "homicidi": 3, "lesions": 3,
+        "violació": 3, "estafa": 3, "resolts": 3,
+        "coneguts": 1, "denuncia": 1, "denúncia": 1,
+        "mossos": 1, "seguretat": 1, "incidents": 1, "incident": 1,
+    },
+    "fets_transport_public": {
+        "transport": 3, "metro": 3, "autobús": 3, "autobus": 3,
+        "bus": 3, "tren": 3, "taxi": 3, "ferrocarril": 3,
+        "rodalies": 3, "fgc": 3, "tmb": 3,
+    },
+    "fets_aeroports": {
+        # City names removed — "girona", "reus", "lleida", "sabadell" appear
+        # in queries about any table. Only unambiguous airport terms here.
+        # "vol" / "vols" are kept but now matched as whole words, so
+        # "evolució" no longer triggers a false airport match.
+        "aeroport": 3, "aeroports": 3, "aeri": 3,
+        "vol": 3, "vols": 3, "terminal": 3, "prat": 3,
+    },
+    "fets_odi_discriminacio": {
+        "odi": 3, "discriminació": 3, "discriminacio": 3,
+        "racisme": 3, "xenofobia": 3, "xenofòbia": 3,
+        "lgbtifòbia": 3, "lgbtifobia": 3, "antisemitisme": 3,
+        "islamofobia": 3, "islamofòbia": 3, "aporofobia": 3,
+        "víctimes": 2, "victimes": 2,
+        "infraccions": 1, "presencial": 1, "xarxes": 1, "internet": 1,
+    },
+}
+
+# Pre-compile one pattern per keyword for whole-word matching.
+# \W matches any non-word character; we wrap the keyword so it is only
+# found when preceded and followed by a non-alphanumeric character (or
+# start/end of string). This handles accented characters correctly because
+# we match on the lowercased query string and the keyword itself is ASCII
+# or Catalan — the surrounding \W check is enough.
+_KW_PATTERNS: dict[str, dict[str, re.Pattern]] = {}
+
+def _build_kw_patterns() -> None:
+    for table, kw_weights in _TABLE_KEYWORDS.items():
+        _KW_PATTERNS[table] = {}
+        for kw in kw_weights:
+            # Use a pattern that treats start/end of string and any
+            # non-alphanumeric character as a word boundary.
+            escaped = re.escape(kw)
+            _KW_PATTERNS[table][kw] = re.compile(
+                rf"(?<![^\W_]){escaped}(?![^\W_])",
+                re.IGNORECASE | re.UNICODE,
+            )
+
+_build_kw_patterns()
+
+
+def _select_relevant_tables(question: str) -> list[str]:
+    """Return the 1-2 most relevant table names for this question.
+
+    Uses whole-word weighted keyword scoring.  The second table is only
+    included when its score is at least half the winner's score — prevents
+    a weak match from tagging along with a clearly dominant winner.
+    """
+    q_lower = question.lower()
+    scores: dict[str, int] = {}
+    for table, kw_weights in _TABLE_KEYWORDS.items():
+        score = sum(
+            w for kw, w in kw_weights.items()
+            if _KW_PATTERNS[table][kw].search(q_lower)
+        )
+        if score > 0:
+            scores[table] = score
+
+    if scores:
+        ranked = sorted(scores, key=scores.get, reverse=True)
+        winner_score = scores[ranked[0]]
+        selected = [ranked[0]]
+        if len(ranked) > 1 and scores[ranked[1]] >= winner_score / 2:
+            selected.append(ranked[1])
+
+        logger.info("Table selection: %s (scores: %s)", selected, scores)
+        print(f"[SQL-CONV] TABLE SELECTION: {selected} from scores {scores}")
+        return selected
+
+    logger.warning("No table keywords matched — sending full schema")
+    print("[SQL-CONV] TABLE SELECTION: no match, sending full schema")
+    return list(_get_schema().keys())
+
+
+def _schema_string(tables: list[str] | None = None) -> str:
+    """Build the schema string, optionally restricted to specific tables."""
+    schema = _get_schema()
+    if tables:
+        schema = {t: v for t, v in schema.items() if t in tables}
     lines = []
-    for table, info in _get_schema().items():
+    for table, info in schema.items():
         col_lines = []
         for col in info["columns"]:
             vals = info["samples"].get(col, [])
@@ -76,106 +184,89 @@ def _schema_string() -> str:
 # Phase 1 — Text-to-SQL prompt + generation
 # ---------------------------------------------------------------------------
 
-def _make_sql_system_prompt() -> str:
-    return f"""You are a PostgreSQL expert. Your only job is to convert a user question into a SQL SELECT query.
-
-DATABASE SCHEMA (PostgreSQL, public schema):
-{_schema_string()}
+_SQL_SYSTEM_STATIC = """You are a PostgreSQL expert. Convert the user question into a SQL SELECT query.
 
 ═══ GEOGRAPHIC FILTERING ═══
-Three tables (fets_penals_detencions, fets_transport_public, fets_aeroports) do NOT have a
-municipality column. They only have "regió_policial_rp" and "àrea_bàsica_policial_abp".
+Tables fets_penals_detencions, fets_transport_public, fets_aeroports have NO municipality column.
+Use "regió_policial_rp" for city/province filters:
+  Barcelona → ILIKE '%%Metropolitana Barcelona%%'
+  Girona    → ILIKE '%%Girona%%'
+  Tarragona → ILIKE '%%Tarragona%%'
+  Lleida    → ILIKE '%%Ponent%%'
+  Terres de l'Ebre → ILIKE '%%Terres de l%%'
+  Catalunya (all) → omit filter
 
-When the user mentions a city or province, map it to the correct region:
-  Barcelona         → "regió_policial_rp" ILIKE '%%Metropolitana Barcelona%%'
-  Girona            → "regió_policial_rp" ILIKE '%%Girona%%'
-  Tarragona         → "regió_policial_rp" ILIKE '%%Tarragona%%'
-  Lleida            → "regió_policial_rp" ILIKE '%%Ponent%%'
-  Terres de l'Ebre  → "regió_policial_rp" ILIKE '%%Terres de l%%'
-  Catalunya (global)→ omit the region filter entirely
+fets_odi_discriminacio: filter on "municipi" ILIKE '%%city%%' or "província".
 
-For "fets_odi_discriminacio", prefer filtering on "municipi" ILIKE '%%city%%' or "província" when available.
+═══ AGGREGATION ═══
+PRE-AGGREGATED tables — use SUM not COUNT(*):
+  fets_penals_detencions → SUM(CAST("coneguts" AS NUMERIC)), SUM(CAST("resolts" AS NUMERIC)), SUM(CAST("detencions" AS NUMERIC))
+  fets_aeroports         → SUM(CAST("nombre" AS NUMERIC))
+  fets_transport_public  → SUM(CAST("<mode>" AS NUMERIC)) where mode = "autobús"|"metro"|"taxi"|"tren"
+  fets_odi_discriminacio → COUNT(*) or SUM(CAST("nombre_víctimes" AS NUMERIC))
 
-═══ TABLE-SPECIFIC AGGREGATION ═══
-The following tables are PRE-AGGREGATED (one row = a group of incidents, not one incident).
-You MUST use SUM, not COUNT(*), to get totals:
+═══ RULES ═══
+1. Return ONLY raw JSON — no markdown, no explanation:
+   {"sql": "SELECT ...", "summary_hint": "<catalan sentence ≤15 words describing what the query returns>"}
 
-  fets_penals_detencions:
-    - "coneguts"   = total known crimes      → SUM(CAST("coneguts" AS NUMERIC))
-    - "resolts"    = total resolved crimes   → SUM(CAST("resolts" AS NUMERIC))
-    - "detencions" = total arrests           → SUM(CAST("detencions" AS NUMERIC))
-    - "tipus_de_fet" = specific crime category (use this for crime type filters)
-    - "títol_codi_penal" = broad legal chapter (only use if user asks for a broad category)
+2. Double-quote ALL identifiers. Never use backticks. "any" is reserved — always quote it as "any".
 
-  fets_aeroports:
-    - "nombre" = total incidents             → SUM(CAST("nombre" AS NUMERIC))
-    - "tipus_de_fet" = crime type at airport
+3. Match filter values to the sample values in the schema. Use ILIKE '%%stem%%' for text columns.
+   Never invent values not shown in samples.
 
-  fets_transport_public:
-    - "autobús", "metro", "taxi", "tren" = incident counts per mode → SUM(CAST("col" AS NUMERIC))
+4. Keep every filter the user mentioned (year, location, type, channel…).
 
-  fets_odi_discriminacio:
-    - "nombre_fets_o_infraccions" = one row per incident → COUNT(*) or SUM is both valid
-    - "nombre_víctimes" = victim count per row → SUM(CAST("nombre_víctimes" AS NUMERIC))
+5. LIMIT {max_rows}. Never SELECT *.
 
-═══ CRITICAL RULES ═══
-1. Respond with ONLY a JSON object: {{"sql": "SELECT ..."}}
-   No explanation, no markdown, no code blocks. Raw JSON only.
-
-2. ALWAYS double-quote identifiers: "table"."column"
-   NEVER use backticks (`). "any" is a reserved word — always write it as "any".
-
-3. FILTER VALUES — always match to the sample values shown in the schema, not the user's exact words.
-   - Find the closest sample value and use its ROOT in ILIKE.
-   - IMPORTANT: the user may use plural or different forms. Always extract the stem from the sample.
-     Examples:
-       user "furts"    → sample shows 'Furt'           → use ILIKE '%%Furt%%'
-       user "robatoris"→ sample shows 'Robatori...'    → use ILIKE '%%Robatori%%'
-       user "presencial"→ sample shows 'Presencial'    → use = 'Presencial'
-   - For "tipus_de_fet" columns: ALWAYS use ILIKE '%%stem%%' (not =) to capture all subtypes.
-     E.g. ILIKE '%%Furt%%' matches 'Furt', 'Furt (lleu)', 'Furt interior vehicle', etc.
-   - Never use a word that does not appear in the sample values of that column.
-
-4. Extract EVERY filter: year ("any"), location (mapped to region), type, channel, etc.
-   Never drop a filter. Never invent values not shown in the schema samples.
-
-5. LIMIT {_MAX_ROWS} rows. Select only columns needed — never SELECT *.
-6. If no table matches: {{"sql": "SELECT 'no_data'"}}
+6. No matching table → {"sql": "SELECT 'no_data'", "summary_hint": ""}
 
 EXAMPLES:
-"Quants robatoris amb força a Barcelona el 2019":
-{{"sql": "SELECT SUM(CAST(\\"coneguts\\" AS NUMERIC)) AS total FROM \\"fets_penals_detencions\\" WHERE \\"any\\" = '2019' AND \\"tipus_de_fet\\" ILIKE '%%robatori amb força%%' AND \\"regió_policial_rp\\" ILIKE '%%Metropolitana Barcelona%%'"}}
+User: "Quants robatoris amb força a Barcelona el 2019"
+{"sql": "SELECT SUM(CAST(\\"coneguts\\" AS NUMERIC)) AS total FROM \\"fets_penals_detencions\\" WHERE \\"any\\" = '2019' AND \\"tipus_de_fet\\" ILIKE '%%Robatori amb força%%' AND \\"regió_policial_rp\\" ILIKE '%%Metropolitana Barcelona%%'", "summary_hint": "Total de robatoris amb força a Barcelona el 2019"}
 
-"Quants fets d'odi a Girona el 2020":
-{{"sql": "SELECT COUNT(*) AS total FROM \\"fets_odi_discriminacio\\" WHERE \\"any\\" = '2020' AND \\"municipi\\" ILIKE '%%Girona%%'"}}
+User: "Quants fets d'odi a Girona el 2020"
+{"sql": "SELECT COUNT(*) AS total FROM \\"fets_odi_discriminacio\\" WHERE \\"any\\" = '2020' AND \\"municipi\\" ILIKE '%%Girona%%'", "summary_hint": "Total de fets d'odi a Girona el 2020"}
+
+User: "Evolució dels fets d'odi a Girona de 2020 a 2024"
+{"sql": "SELECT \\"any\\", COUNT(*) AS total FROM \\"fets_odi_discriminacio\\" WHERE \\"municipi\\" ILIKE '%%Girona%%' AND \\"any\\" BETWEEN '2020' AND '2024' GROUP BY \\"any\\" ORDER BY \\"any\\" LIMIT 50", "summary_hint": "Evolució anual dels fets d'odi a Girona de 2020 a 2024"}
+
+User: "Compara fets d'odi presencial amb internet a Girona el 2020"
+{"sql": "SELECT \\"canal_dels_fets\\", COUNT(*) AS total FROM \\"fets_odi_discriminacio\\" WHERE \\"any\\" = '2020' AND \\"municipi\\" ILIKE '%%Girona%%' GROUP BY \\"canal_dels_fets\\" LIMIT 50", "summary_hint": "Comparació de fets d'odi per canal a Girona el 2020"}
 """
 
 
-_SQL_RE = re.compile(r'\{[^{}]*"sql"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}', re.DOTALL)
+def _make_sql_system_prompt(tables: list[str]) -> str:
+    schema_block = _schema_string(tables)
+    prompt = _SQL_SYSTEM_STATIC.replace("{max_rows}", str(_MAX_ROWS))
+    return (
+        f"DATABASE SCHEMA (only relevant tables shown):\n"
+        f"{schema_block}\n\n{prompt}"
+    )
 
 
-def _extract_sql(raw: str) -> str | None:
+def _extract_sql_and_hint(raw: str) -> tuple[str | None, str]:
     raw = raw.strip()
-    # Direct JSON parse
     try:
         obj = json.loads(raw)
         if isinstance(obj, dict) and "sql" in obj:
-            return obj["sql"].strip()
+            return obj["sql"].strip(), obj.get("summary_hint", "")
     except json.JSONDecodeError:
         pass
-    # Regex fallback — handles surrounding text
-    m = _SQL_RE.search(raw)
+
+    m = re.search(r'\{[^{}]*"sql"[^{}]*\}', raw, re.DOTALL)
     if m:
         try:
             obj = json.loads(m.group(0))
-            return obj["sql"].strip()
+            if "sql" in obj:
+                return obj["sql"].strip(), obj.get("summary_hint", "")
         except Exception:
             pass
-    # Last resort: bare SELECT statement
+
     sel = re.search(r'(SELECT\s.+?;)', raw, re.IGNORECASE | re.DOTALL)
     if sel:
-        return sel.group(1).strip()
-    return None
+        return sel.group(1).strip(), ""
+
+    return None, ""
 
 
 _BACKTICK_RE = re.compile(r'`([^`]+)`')
@@ -183,45 +274,29 @@ _QUOTED_IDENT_RE = re.compile(r'"([^"]+)"')
 
 
 def _sanitize_sql(sql: str) -> str:
-    """Backtick → double-quote; ensure `any` reserved word is quoted."""
     sql = _BACKTICK_RE.sub(lambda m: f'"{m.group(1)}"', sql)
     sql = re.sub(r'(?<!")\bany\b(?!")', '"any"', sql, flags=re.IGNORECASE)
     return sql
 
 
 def _best_column_match(col: str, real_cols_lower: dict[str, str]) -> str | None:
-    """Find the best real column for an abbreviated/hallucinated name.
-
-    Priority:
-      1. Exact match (case-insensitive)
-      2. Prefix match — col is a prefix of exactly one real column (e.g. "canal" → "canal_dels_fets")
-      3. Substring match — col appears inside exactly one real column
-      4. difflib fuzzy (cutoff 0.5)
-    Returns None if nothing good is found.
-    """
     c = col.lower()
     if c in real_cols_lower:
         return real_cols_lower[c]
-
     prefix = [k for k in real_cols_lower if k.startswith(c)]
     if len(prefix) == 1:
         return real_cols_lower[prefix[0]]
-
     substr = [k for k in real_cols_lower if c in k]
     if len(substr) == 1:
         return real_cols_lower[substr[0]]
-
     close = difflib.get_close_matches(c, real_cols_lower.keys(), n=1, cutoff=0.5)
     if close:
         return real_cols_lower[close[0]]
-
     return None
 
 
 def _fix_column_names(sql: str) -> str:
-    """Auto-correct abbreviated/hallucinated column names against the real schema."""
     schema = _get_schema()
-
     from_match = re.search(r'FROM\s+"([^"]+)"', sql, re.IGNORECASE)
     if not from_match:
         return sql
@@ -249,14 +324,12 @@ def _fix_column_names(sql: str) -> str:
     return fixed
 
 
-# Columns where = should always become ILIKE (location/name text fields)
 _ILIKE_COLS = {
     "aeroport", "municipi", "comarca", "província",
     "àrea_bàsica_policial_abp", "àrea_regional_de_trànsit_art__àrea_bàsica_policial_abp",
     "regió_policial_rp", "tipus_de_fet", "títol_codi_penal", "tipus_de_lloc_dels_fets",
 }
 
-# Pattern: "col" = 'value'  or  "col" ILIKE '%%value%%'
 _FILTER_RE = re.compile(
     r'"([^"]+)"\s*(=|ILIKE)\s*\'((?:[^\'\\]|\\.)*?)\'',
     re.IGNORECASE,
@@ -264,13 +337,6 @@ _FILTER_RE = re.compile(
 
 
 def _fix_filter_values(sql: str) -> str:
-    """Validate and fix filter values against real schema sample values.
-
-    For each "col" = 'value' or "col" ILIKE '%%value%%':
-    - If the value matches a sample exactly (case-insensitive) → keep as-is (use = or ILIKE).
-    - If no exact match but a sample contains the value as substring → convert to ILIKE '%%value%%'.
-    - For columns in _ILIKE_COLS: always use ILIKE regardless of original operator.
-    """
     schema = _get_schema()
     from_match = re.search(r'FROM\s+"([^"]+)"', sql, re.IGNORECASE)
     if not from_match:
@@ -286,28 +352,24 @@ def _fix_filter_values(sql: str) -> str:
         val_lower = val.lower()
         col_lower = col.lower()
 
-        # Check exact match (case-insensitive) against samples
         exact = any(s.lower() == val_lower for s in col_samples)
-
-        # Force ILIKE for location/name columns
         force_ilike = col_lower in _ILIKE_COLS
 
         if exact and not force_ilike:
-            # Keep original filter unchanged
             return m.group(0)
 
-        # Strip %% wrappers the model might have added before re-wrapping
         clean_val = val.strip('%').strip()
 
         if exact and force_ilike:
-            # Exact value found but column should use ILIKE for robustness
             new_filter = f'"{col}" ILIKE \'%%{clean_val}%%\''
             if new_filter != m.group(0):
                 print(f"[SQL-CONV] VALUE→ILIKE: \"{col}\" = '{val}' → ILIKE '%%{clean_val}%%'")
             return new_filter
 
-        # No exact match — try substring match against samples
-        partial_match = next((s for s in col_samples if val_lower in s.lower() or s.lower() in val_lower), None)
+        partial_match = next(
+            (s for s in col_samples if val_lower in s.lower() or s.lower() in val_lower),
+            None,
+        )
         if partial_match:
             print(f"[SQL-CONV] VALUE FIX: \"{col}\" '{val}' → ILIKE '%%{clean_val}%%' (sample: '{partial_match}')")
         else:
@@ -320,14 +382,15 @@ def _fix_filter_values(sql: str) -> str:
     return fixed
 
 
-def _generate_sql(user_query: str, llm: ChatOllama) -> str | None:
-    system_prompt = _make_sql_system_prompt()
-    print("\n" + "="*60)
-    print("[SQL-CONV] SCHEMA SENT TO LLM:")
-    print(_schema_string())
-    print("="*60)
+def _generate_sql(user_query: str, llm: ChatOllama) -> tuple[str | None, str]:
+    relevant_tables = _select_relevant_tables(user_query)
+    system_prompt = _make_sql_system_prompt(relevant_tables)
+
+    print("\n" + "=" * 60)
+    print(f"[SQL-CONV] TABLES IN PROMPT: {relevant_tables}")
+    print(f"[SQL-CONV] PROMPT LENGTH (chars): {len(system_prompt)}")
     print(f"[SQL-CONV] USER QUERY: {user_query}")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     msgs = [SystemMessage(content=system_prompt), HumanMessage(content=user_query)]
     try:
@@ -336,32 +399,34 @@ def _generate_sql(user_query: str, llm: ChatOllama) -> str | None:
         print(f"[SQL-CONV] RAW LLM OUTPUT:\n{raw}\n")
         logger.info("SQL gen raw output: %s", raw)
 
-        sql = _extract_sql(raw)
-        print(f"[SQL-CONV] EXTRACTED SQL: {sql}")
+        sql, hint = _extract_sql_and_hint(raw)
+        print(f"[SQL-CONV] EXTRACTED SQL:  {sql}")
+        print(f"[SQL-CONV] SUMMARY HINT:   {hint}")
 
         if sql:
             sql = _sanitize_sql(sql)
-            print(f"[SQL-CONV] AFTER SANITIZE:  {sql}")
+            print(f"[SQL-CONV] AFTER SANITIZE: {sql}")
             sql = _fix_column_names(sql)
-            print(f"[SQL-CONV] AFTER COL FIX:   {sql}")
+            print(f"[SQL-CONV] AFTER COL FIX:  {sql}")
             sql = _fix_filter_values(sql)
-            print(f"[SQL-CONV] FINAL SQL:        {sql}\n")
+            print(f"[SQL-CONV] FINAL SQL:       {sql}\n")
             logger.info("Final SQL: %s", sql)
         else:
             print("[SQL-CONV] WARNING: Could not extract SQL from LLM output\n")
-        return sql
+
+        return sql, hint
+
     except Exception as e:
         print(f"[SQL-CONV] ERROR generating SQL: {e}")
         logger.error("SQL generation failed: %s", e)
-        return None
+        return None, ""
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — Direct SQL execution with auto-retry on UndefinedColumn
+# Phase 2 — SQL execution with auto-retry on UndefinedColumn
 # ---------------------------------------------------------------------------
 
 def _normalize(s: str) -> str:
-    """Lowercase + strip accents for fuzzy column matching."""
     return ''.join(
         c for c in unicodedata.normalize('NFD', s.lower())
         if unicodedata.category(c) != 'Mn'
@@ -375,11 +440,6 @@ _CASE_EXPR_RE = re.compile(
 
 
 def _wrap_alias_case_as_subquery(sql: str) -> str:
-    """Move CASE WHEN expressions that reference SELECT aliases into an outer SELECT.
-
-    PostgreSQL disallows: SELECT COUNT(*) AS n, CASE WHEN n = 0 ...
-    This rewrites it as:  SELECT *, CASE WHEN n = 0 ... FROM (SELECT COUNT(*) AS n ...) _s
-    """
     case_exprs = _CASE_EXPR_RE.findall(sql)
     if not case_exprs:
         return sql
@@ -389,12 +449,6 @@ def _wrap_alias_case_as_subquery(sql: str) -> str:
 
 
 def _execute_sql(sql: str) -> list[dict]:
-    """Execute SQL, retrying up to 2 times on UndefinedColumn errors.
-
-    On each failure: extract the bad identifier from the error message,
-    find the real column via accent-normalized lookup or PostgreSQL's HINT,
-    substitute it with a properly quoted name, then retry.
-    """
     schema = _get_schema()
     norm_map: dict[str, str] = {}
     for info in schema.values():
@@ -418,31 +472,24 @@ def _execute_sql(sql: str) -> list[dict]:
                 return dicts
         except Exception as e:
             err = str(e)
-            # Only retry on UndefinedColumn
             if "UndefinedColumn" not in type(e).__name__ and "undefined_column" not in err and "does not exist" not in err:
                 raise
 
-            # Extract the bad column name from the error message
             bad_match = re.search(r'column "([^"]+)" does not exist', err)
             if not bad_match:
-                # Try unquoted form: column nombre_victimes does not exist
                 bad_match = re.search(r'column (\S+) does not exist', err)
             if not bad_match:
                 raise
 
             bad_col = bad_match.group(1).strip('"')
 
-            # 1. Try PostgreSQL's own HINT first ("perhaps you meant X")
             hint_match = re.search(r'reference the column "([^"]+)"', err)
             if hint_match:
                 real = hint_match.group(1).split(".")[-1]
             else:
-                # 2. Normalize and look up in our schema map
                 real = norm_map.get(_normalize(bad_col))
 
             if not real:
-                # Check if the bad identifier is actually a SELECT alias used in
-                # a CASE WHEN — PostgreSQL forbids referencing same-level aliases.
                 is_alias = bool(re.search(
                     rf'\bAS\s+{re.escape(bad_col)}\b', sql, re.IGNORECASE
                 ))
@@ -452,36 +499,63 @@ def _execute_sql(sql: str) -> list[dict]:
                         print(f"[SQL-CONV] ALIAS REWRITE: '{bad_col}' is a SELECT alias → wrapping in subquery")
                         logger.info("Alias reference rewrite triggered by '%s'", bad_col)
                         sql = rewritten
-                        continue  # retry with the rewritten SQL
+                        continue
                 print(f"[SQL-CONV] RETRY FAILED: '{bad_col}' is neither a column nor rewritable alias")
                 raise
 
             print(f"[SQL-CONV] RETRY {attempt + 1}: '{bad_col}' → '{real}'")
             logger.info("Column retry correction: '%s' → '%s'", bad_col, real)
-
-            # Replace the bad identifier (quoted or unquoted) with the real name
             sql = re.sub(
                 rf'(?<!["\w]){re.escape(bad_col)}(?!["\w])',
                 f'"{real}"',
                 sql,
             )
 
-    raise RuntimeError(f"SQL execution failed after 3 attempts")
+    raise RuntimeError("SQL execution failed after 3 attempts")
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — Summarize result in Catalan
+# Phase 3 — Result formatting
+#
+# Strategy (hybrid):
+#   • 1 row, 1 column  → programmatic — no LLM (COUNT/SUM single value)
+#   • 1 row, N columns → programmatic — no LLM (key-value breakdown)
+#   • N rows           → full LLM summarise — trends, comparisons, rankings
+#                        need narrative that a plain text table can't convey
 # ---------------------------------------------------------------------------
 
 _SUMMARIZE_SYSTEM = """Ets un assistent de dades de seguretat pública de Catalunya.
 Se't dona una pregunta i el resultat d'una consulta a la base de dades.
 Respon en català, de forma clara i directa, citant les xifres concretes.
-Si hi ha diverses files, fes un resum concís. No mostris SQL ni tècnics detalls."""
+Si hi ha diverses files, fes un resum concís. No mostris SQL ni detalls tècnics."""
 
 
-def _summarize(user_query: str, rows: list[dict], llm: ChatOllama) -> str:
-    result_text = json.dumps(rows, ensure_ascii=False, default=str)
-    print(f"[SQL-CONV] SUMMARIZING {len(rows)} rows")
+def _format_result(user_query: str, rows: list[dict], hint: str, llm: ChatOllama) -> str:
+    print(f"[SQL-CONV] FORMATTING {len(rows)} rows")
+
+    # ── Single-value (COUNT / SUM): no LLM needed ──
+    if len(rows) == 1 and len(rows[0]) == 1:
+        val = list(rows[0].values())[0]
+        try:
+            val_num = float(val)
+            val_str = str(int(val_num)) if val_num == int(val_num) else f"{val_num:,.2f}"
+        except (TypeError, ValueError):
+            val_str = str(val)
+        result = f"{hint}: **{val_str}**" if hint else f"El resultat de la consulta és **{val_str}**."
+        print(f"[SQL-CONV] FINAL ANSWER (programmatic):\n{result}\n")
+        return result
+
+    # ── Single row, multiple columns: no LLM needed ──
+    if len(rows) == 1:
+        parts = [f"**{k}**: {v}" for k, v in rows[0].items()]
+        prefix = f"{hint}\n\n" if hint else ""
+        result = prefix + "\n".join(parts)
+        print(f"[SQL-CONV] FINAL ANSWER (programmatic):\n{result}\n")
+        return result
+
+    # ── Multiple rows: LLM summarise for readable narrative ──
+    result_text = json.dumps(rows[:_MAX_ROWS], ensure_ascii=False, default=str)
+    print(f"[SQL-CONV] SUMMARIZING {len(rows)} rows with LLM")
     print(f"[SQL-CONV] RAW RESULT SENT TO SUMMARIZER:\n{result_text[:500]}\n")
     content = f"Pregunta: {user_query}\n\nResultat:\n{result_text}"
     try:
@@ -489,11 +563,16 @@ def _summarize(user_query: str, rows: list[dict], llm: ChatOllama) -> str:
             SystemMessage(content=_SUMMARIZE_SYSTEM),
             HumanMessage(content=content),
         ]).content.strip()
-        print(f"[SQL-CONV] FINAL ANSWER:\n{answer}\n")
+        print(f"[SQL-CONV] FINAL ANSWER (LLM summarise):\n{answer}\n")
         return answer
     except Exception as e:
-        logger.error("Summarize failed: %s", e)
-        return f"Resultat de la consulta: {result_text}"
+        logger.error("Summarize LLM failed: %s", e)
+        # Graceful fallback: plain text table
+        cols = list(rows[0].keys())
+        lines = [" | ".join(cols), "-" * len(" | ".join(cols))]
+        for row in rows[:10]:
+            lines.append(" | ".join(str(row.get(c, "")) for c in cols))
+        return (f"{hint}\n\n" if hint else "") + "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -502,11 +581,11 @@ def _summarize(user_query: str, rows: list[dict], llm: ChatOllama) -> str:
 
 def query_database(user_query: str, model: str | None = None) -> str:
     effective_model = model or settings.OLLAMA_SQL_MODEL
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print(f"[SQL-CONV] query_database() called")
     print(f"[SQL-CONV] Model: {effective_model}")
     print(f"[SQL-CONV] Query: {user_query}")
-    print(f"{'#'*60}\n")
+    print(f"{'#' * 60}\n")
 
     llm = ChatOllama(
         base_url=settings.OLLAMA_BASE_URL,
@@ -514,7 +593,8 @@ def query_database(user_query: str, model: str | None = None) -> str:
         temperature=0,
     )
 
-    sql = _generate_sql(user_query, llm)
+    sql, hint = _generate_sql(user_query, llm)
+
     if not sql:
         print("[SQL-CONV] FAILED: no SQL extracted from LLM output")
         return "No he pogut generar una consulta per a aquesta pregunta. Podries reformular-la amb més detall?"
@@ -532,6 +612,9 @@ def query_database(user_query: str, model: str | None = None) -> str:
 
     if not rows:
         print("[SQL-CONV] 0 rows — returning empty result message")
-        return "No he trobat cap registre que coincideixi amb els filtres de la teva pregunta. Prova amb un any diferent, una altra localitat o sense algun filtre específic."
+        return (
+            "No he trobat cap registre que coincideixi amb els filtres de la teva pregunta. "
+            "Prova amb un any diferent, una altra localitat o sense algun filtre específic."
+        )
 
-    return _summarize(user_query, rows, llm)
+    return _format_result(user_query, rows, hint, llm)
