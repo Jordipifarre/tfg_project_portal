@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # --- Dynamic model routing ---
     OLLAMA_ROUTER_MODEL: str = "qwen2.5-coder:3b"
     OLLAMA_SQL_MODEL: str = "qwen2.5-coder:7b"
+    OLLAMA_SUMMARIZE_MODEL: str = "qwen3.5:4b"
     OLLAMA_RAG_MODEL: str = "qwen2.5-coder:3b"
     ENABLE_DYNAMIC_ROUTING: bool = True
 
