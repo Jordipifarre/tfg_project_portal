@@ -1,13 +1,19 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
-import { fetchTransportStats, type TransportStats } from "@/lib/api";
+import {
+  fetchTransportStats, fetchTransportMapStats,
+  type TransportStats, type TransportMapRegion,
+} from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Train, Car, Zap } from "lucide-react";
+import { Train, Car, Zap, MapPin, X } from "lucide-react";
+
+const TransportMap = dynamic(() => import("./TransportMap"), { ssr: false });
 
 const TT = {
   backgroundColor: "#ffffff",
@@ -31,18 +37,35 @@ const MODE_COLORS: Record<string, string> = {
 export function TransportDashboard() {
   const [data, setData] = useState<TransportStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]     = useState<string | null>(null);
+
+  // Map state
+  const [mapRegions,  setMapRegions]  = useState<TransportMapRegion[]>([]);
+  const [mapLoading,  setMapLoading]  = useState(true);
+  const [filterYears, setFilterYears] = useState<string[]>([]);
+  const [selYear,     setSelYear]     = useState("");
 
   useEffect(() => {
     fetchTransportStats().then(setData).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    setMapLoading(true);
+    fetchTransportMapStats(selYear || undefined)
+      .then((d) => {
+        setMapRegions(d.regions);
+        if (filterYears.length === 0) setFilterYears(d.filter_options.years);
+      })
+      .catch(() => setMapRegions([]))
+      .finally(() => setMapLoading(false));
+  }, [selYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <Skeleton className="h-[600px] rounded-lg bg-gray-100" />;
   if (error) return <ErrorBox msg={error} />;
   if (!data) return null;
 
   const totalByMode = data.by_mode.reduce((s, m) => s + m.total, 0);
-  const topMode = data.by_mode.sort((a, b) => b.total - a.total)[0];
+  const topMode = [...data.by_mode].sort((a, b) => b.total - a.total)[0];
   const latest = data.trend.at(-1);
   const latestTotal = latest
     ? Object.entries(latest).filter(([k]) => k !== "year").reduce((s, [, v]) => s + (v as number), 0)
@@ -133,6 +156,51 @@ export function TransportDashboard() {
             </ResponsiveContainer>
           ) : <NoData />}
         </Card>
+      </div>
+
+      {/* Map */}
+      <div className="rounded-lg border border-[#e5e5e5] bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-base font-bold text-[#1f2937] flex items-center gap-2">
+              <MapPin size={15} className="text-[#15803d]" />
+              Distribució per Regió Policial
+            </h3>
+            <p className="text-xs text-[#6b7280]">
+              Incidents per RP i mode de transport — selecciona el mode per canviar el mapa
+            </p>
+          </div>
+
+          {/* Year filter */}
+          <div className="flex gap-2 items-center">
+            <select
+              value={selYear}
+              onChange={(e) => setSelYear(e.target.value)}
+              className="text-xs border border-[#e5e5e5] rounded-md px-2 py-1 bg-white text-[#374151] focus:outline-none focus:border-[#15803d]"
+            >
+              <option value="">Tots els anys</option>
+              {filterYears.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+
+            {selYear && (
+              <button
+                onClick={() => setSelYear("")}
+                className="flex items-center gap-1 text-xs text-[#6b7280] hover:text-[#dc2626] border border-[#e5e5e5] rounded-md px-2 py-1 transition-colors"
+                title="Esborrar filtre"
+              >
+                <X size={12} /> Netejar
+              </button>
+            )}
+          </div>
+        </div>
+
+        {mapLoading ? (
+          <div className="h-[460px] flex items-center justify-center text-[#9ca3af] text-sm">
+            Carregant dades del mapa…
+          </div>
+        ) : (
+          <TransportMap data={mapRegions} />
+        )}
       </div>
     </div>
   );

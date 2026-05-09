@@ -1,13 +1,19 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { fetchPenalStats, type PenalStats } from "@/lib/api";
+import {
+  fetchPenalStats, fetchPenalMapStats,
+  type PenalStats, type PenalMapRegion,
+} from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ShieldAlert, CheckCircle, Users } from "lucide-react";
+import { ShieldAlert, CheckCircle, Users, MapPin, X } from "lucide-react";
+
+const PenalMap = dynamic(() => import("./PenalMap"), { ssr: false });
 
 const C = { known: "#dc2626", resolved: "#15803d", arrests: "#d97706" };
 const TT = {
@@ -24,9 +30,42 @@ export function PenalDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Map state
+  const [mapRegions,    setMapRegions]    = useState<PenalMapRegion[]>([]);
+  const [mapLoading,    setMapLoading]    = useState(true);
+  const [filterYears,   setFilterYears]   = useState<string[]>([]);
+  const [filterMonths,  setFilterMonths]  = useState<{ num: number; name: string }[]>([]);
+  const [filterCrimes,  setFilterCrimes]  = useState<string[]>([]);
+  const [selYear,       setSelYear]       = useState("");
+  const [selMonth,      setSelMonth]      = useState("");
+  const [selCrime,      setSelCrime]      = useState("");
+
   useEffect(() => {
     fetchPenalStats().then(setData).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }, []);
+
+  const loadMap = useCallback(
+    (year: string, month: string, crime: string) => {
+      setMapLoading(true);
+      const params: Record<string, string> = {};
+      if (year)  params.year       = year;
+      if (month) params.month      = month;
+      if (crime) params.crime_type = crime;
+      fetchPenalMapStats(params)
+        .then((d) => {
+          setMapRegions(d.regions);
+          if (filterYears.length  === 0) setFilterYears(d.filter_options.years);
+          if (filterMonths.length === 0) setFilterMonths(d.filter_options.months);
+          if (filterCrimes.length === 0) setFilterCrimes(d.filter_options.crime_types);
+        })
+        .catch(() => setMapRegions([]))
+        .finally(() => setMapLoading(false));
+    },
+    [filterYears.length, filterMonths.length, filterCrimes.length],
+  );
+
+  // Runs on mount (empty filters = all data) and whenever a filter changes
+  useEffect(() => { loadMap(selYear, selMonth, selCrime); }, [selYear, selMonth, selCrime]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <Skeleton className="h-[600px] rounded-lg bg-gray-100" />;
   if (error) return <ErrorBox msg={error} />;
@@ -100,6 +139,71 @@ export function PenalDashboard() {
           </BarChart>
         </ResponsiveContainer>
       </Card>
+
+      {/* Map */}
+      <div className="rounded-lg border border-[#e5e5e5] bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-base font-bold text-[#1f2937] flex items-center gap-2">
+              <MapPin size={15} className="text-[#1e3a8a]" />
+              Distribució per Regió Policial
+            </h3>
+            <p className="text-xs text-[#6b7280]">
+              Fets coneguts, resolts i detencions per RP — passa el cursor per veure el detall
+            </p>
+          </div>
+
+          {/* Filter controls */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <select
+              value={selYear}
+              onChange={(e) => setSelYear(e.target.value)}
+              className="text-xs border border-[#e5e5e5] rounded-md px-2 py-1 bg-white text-[#374151] focus:outline-none focus:border-[#1e3a8a]"
+            >
+              <option value="">Tots els anys</option>
+              {filterYears.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+
+            <select
+              value={selMonth}
+              onChange={(e) => setSelMonth(e.target.value)}
+              className="text-xs border border-[#e5e5e5] rounded-md px-2 py-1 bg-white text-[#374151] focus:outline-none focus:border-[#1e3a8a] capitalize"
+            >
+              <option value="">Tots els mesos</option>
+              {filterMonths.map((m) => (
+                <option key={m.name} value={m.name} className="capitalize">{m.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={selCrime}
+              onChange={(e) => setSelCrime(e.target.value)}
+              className="text-xs border border-[#e5e5e5] rounded-md px-2 py-1 bg-white text-[#374151] focus:outline-none focus:border-[#1e3a8a] max-w-[200px]"
+            >
+              <option value="">Tots els tipus</option>
+              {filterCrimes.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+
+            {(selYear || selMonth || selCrime) && (
+              <button
+                onClick={() => { setSelYear(""); setSelMonth(""); setSelCrime(""); }}
+                className="flex items-center gap-1 text-xs text-[#6b7280] hover:text-[#dc2626] border border-[#e5e5e5] rounded-md px-2 py-1 transition-colors"
+                title="Esborrar filtres"
+              >
+                <X size={12} /> Netejar
+              </button>
+            )}
+          </div>
+        </div>
+
+        {mapLoading ? (
+          <div className="h-[460px] flex items-center justify-center text-[#9ca3af] text-sm">
+            Carregant dades del mapa…
+          </div>
+        ) : (
+          <PenalMap data={mapRegions} />
+        )}
+      </div>
     </div>
   );
 }

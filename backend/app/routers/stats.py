@@ -363,13 +363,12 @@ async def hate_crimes_stats():
 
 @router.get("/stats/hate-crimes/map")
 async def hate_crimes_map(granularity: str = "comarca"):
-    if granularity not in {"provincia", "comarca", "municipi"}:
-        raise HTTPException(400, "granularity must be 'provincia', 'comarca', or 'municipi'")
+    if granularity not in {"provincia", "comarca"}:
+        raise HTTPException(400, "granularity must be 'provincia' or 'comarca'")
 
     geo_keywords: dict[str, list[str]] = {
         "provincia": ["provincia"],
         "comarca":   ["comarca"],
-        "municipi":  ["municipi"],
     }
 
     try:
@@ -409,6 +408,220 @@ async def hate_crimes_map(granularity: str = "comarca"):
         raise
     except Exception as e:
         logger.error("Hate crimes map: %s", e)
+        raise HTTPException(500, str(e))
+
+
+# ---------------------------------------------------------------------------
+# Penal offenses — geographic map aggregation with optional filters
+# ---------------------------------------------------------------------------
+
+@router.get("/stats/penal/map")
+async def penal_map(
+    year:       str | None = None,
+    month:      str | None = None,
+    crime_type: str | None = None,
+):
+    try:
+        with db._engine.connect() as conn:
+            tables = _get_tables(conn)
+            table  = _find_table(tables, "penal", "detencion")
+            if not table:
+                raise HTTPException(404, "Penal table not found")
+
+            cols = _get_cols(conn, table)
+            rp_col = _find_col(cols, "policial")      # Regió Policial (RP)
+            yc     = _find_col(cols, "any")
+            mc     = _find_col(cols, "nom mes")        # Nom mes (text name)
+            mes_nc = _find_col(cols, "mes")            # Mes (numeric, for ordering)
+            tc     = _find_col(cols, "tipus de fet", "tipus")
+            kc     = _find_col(cols, "coneg")
+            resc   = _find_col(cols, "resolt")
+            ac     = _find_col(cols, "detenc")
+
+            if not rp_col:
+                raise HTTPException(422, f"Regió Policial column not found. Cols: {cols}")
+
+            # ── Filter options (always full set, independent of active filters) ──
+            years: list[str] = []
+            if yc:
+                r = conn.execute(text(
+                    f'SELECT DISTINCT {_q(yc)} FROM "{table}"'
+                    f' WHERE {_q(yc)} IS NOT NULL ORDER BY {_q(yc)}'
+                ))
+                years = [str(row[0]) for row in r]
+
+            months: list[dict] = []
+            if mc and mes_nc:
+                r = conn.execute(text(
+                    f'SELECT DISTINCT {_q(mes_nc)}, {_q(mc)} FROM "{table}"'
+                    f' WHERE {_q(mc)} IS NOT NULL AND {_q(mc)}::text <> \'\''
+                    f' ORDER BY {_q(mes_nc)}::integer'
+                ))
+                months = [{"num": int(row[0]), "name": str(row[1])} for row in r]
+            elif mc:
+                r = conn.execute(text(
+                    f'SELECT DISTINCT {_q(mc)} FROM "{table}"'
+                    f' WHERE {_q(mc)} IS NOT NULL ORDER BY {_q(mc)}'
+                ))
+                months = [{"num": 0, "name": str(row[0])} for row in r]
+
+            crime_types: list[str] = []
+            if tc:
+                r = conn.execute(text(
+                    f'SELECT DISTINCT {_q(tc)} FROM "{table}"'
+                    f' WHERE {_q(tc)} IS NOT NULL AND {_q(tc)}::text <> \'\''
+                    f' ORDER BY {_q(tc)}'
+                ))
+                crime_types = [str(row[0]) for row in r]
+
+            # ── WHERE clause for map aggregation ─────────────────────────
+            where_parts = [
+                f"TRIM({_q(rp_col)}::text) IS NOT NULL",
+                f"TRIM({_q(rp_col)}::text) <> ''",
+                f"LOWER(TRIM({_q(rp_col)}::text)) NOT LIKE '%virtual%'",
+            ]
+            params: dict = {}
+
+            if year and yc:
+                where_parts.append(f"{_q(yc)}::text = :year")
+                params["year"] = year
+            if month and mc:
+                where_parts.append(f"LOWER({_q(mc)}::text) = LOWER(:month)")
+                params["month"] = month
+            if crime_type and tc:
+                where_parts.append(f"{_q(tc)}::text = :crime_type")
+                params["crime_type"] = crime_type
+
+            where = " AND ".join(where_parts)
+
+            # ── Map aggregation ───────────────────────────────────────────
+            regions: list = []
+            if kc and resc and ac:
+                r = conn.execute(
+                    text(
+                        f'SELECT TRIM({_q(rp_col)}::text),'
+                        f'  {_safe_sum(kc)}, {_safe_sum(resc)}, {_safe_sum(ac)}'
+                        f' FROM "{table}"'
+                        f' WHERE {where}'
+                        f' GROUP BY TRIM({_q(rp_col)}::text)'
+                        f' ORDER BY 2 DESC'
+                    ),
+                    params,
+                )
+                regions = [
+                    {
+                        "name":     str(row[0]),
+                        "known":    int(row[1] or 0),
+                        "resolved": int(row[2] or 0),
+                        "arrests":  int(row[3] or 0),
+                    }
+                    for row in r
+                ]
+
+            return {
+                "regions": regions,
+                "filter_options": {
+                    "years":       years,
+                    "months":      months,
+                    "crime_types": crime_types,
+                },
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Penal map: %s", e)
+        raise HTTPException(500, str(e))
+
+
+# ---------------------------------------------------------------------------
+# Transport — geographic map aggregation with optional year filter
+# ---------------------------------------------------------------------------
+
+@router.get("/stats/transport/map")
+async def transport_map(year: str | None = None):
+    try:
+        with db._engine.connect() as conn:
+            tables = _get_tables(conn)
+            table  = _find_table(tables, "transport")
+            if not table:
+                raise HTTPException(404, "Transport table not found")
+
+            cols   = _get_cols(conn, table)
+            rp_col = _find_col(cols, "policial")
+            yc     = _find_col(cols, "any")
+            bus_c  = _find_col(cols, "autob")
+            met_c  = _find_col(cols, "metro")
+            tax_c  = _find_col(cols, "taxi")
+            trn_c  = _find_col(cols, "tren")
+
+            if not rp_col:
+                raise HTTPException(422, f"Regió Policial column not found. Cols: {cols}")
+
+            # ── Filter options ────────────────────────────────────────────
+            years: list[str] = []
+            if yc:
+                r = conn.execute(text(
+                    f'SELECT DISTINCT {_q(yc)} FROM "{table}"'
+                    f' WHERE {_q(yc)} IS NOT NULL ORDER BY {_q(yc)}'
+                ))
+                years = [str(row[0]) for row in r]
+
+            # ── WHERE clause ──────────────────────────────────────────────
+            where_parts = [
+                f"TRIM({_q(rp_col)}::text) IS NOT NULL",
+                f"TRIM({_q(rp_col)}::text) <> ''",
+            ]
+            params: dict = {}
+            if year and yc:
+                where_parts.append(f"{_q(yc)}::text = :year")
+                params["year"] = year
+            where = " AND ".join(where_parts)
+
+            # ── Aggregation ───────────────────────────────────────────────
+            mode_cols = {
+                "bus":   bus_c,
+                "metro": met_c,
+                "taxi":  tax_c,
+                "train": trn_c,
+            }
+            present = {k: v for k, v in mode_cols.items() if v}
+
+            regions: list = []
+            if present:
+                sel_parts = [f"TRIM({_q(rp_col)}::text)"] + [
+                    f"{_safe_sum(v)} AS {k}" for k, v in present.items()
+                ]
+                r = conn.execute(
+                    text(
+                        f'SELECT {", ".join(sel_parts)}'
+                        f' FROM "{table}"'
+                        f' WHERE {where}'
+                        f' GROUP BY TRIM({_q(rp_col)}::text)'
+                        f' ORDER BY 2 DESC'
+                    ),
+                    params,
+                )
+                for row in r:
+                    entry: dict = {"name": str(row[0])}
+                    total = 0
+                    for i, k in enumerate(present.keys()):
+                        val = int(row[i + 1] or 0)
+                        entry[k] = val
+                        total += val
+                    # Fill any missing modes with 0
+                    for k in mode_cols:
+                        entry.setdefault(k, 0)
+                    entry["total"] = total
+                    regions.append(entry)
+
+            return {
+                "regions": regions,
+                "filter_options": {"years": years},
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Transport map: %s", e)
         raise HTTPException(500, str(e))
 
 

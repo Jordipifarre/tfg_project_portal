@@ -37,10 +37,36 @@ export interface HateCrimesStats {
   by_channel: { channel: string; total: number }[];
   by_scope: { scope: string; total: number }[];
 }
-export type MapGranularity = "provincia" | "comarca" | "municipi";
+export type MapGranularity = "provincia" | "comarca";
 export interface HateCrimesMapStats {
   regions: { name: string; incidents: number; victims: number }[];
   granularity: MapGranularity;
+}
+export interface PenalMapRegion {
+  name: string;
+  known: number;
+  resolved: number;
+  arrests: number;
+}
+export interface PenalMapStats {
+  regions: PenalMapRegion[];
+  filter_options: {
+    years: string[];
+    months: { num: number; name: string }[];
+    crime_types: string[];
+  };
+}
+export interface TransportMapRegion {
+  name: string;
+  bus: number;
+  metro: number;
+  taxi: number;
+  train: number;
+  total: number;
+}
+export interface TransportMapStats {
+  regions: TransportMapRegion[];
+  filter_options: { years: string[] };
 }
 export interface TransportStats {
   trend: { year: string; bus?: number; metro?: number; taxi?: number; train?: number }[];
@@ -76,6 +102,18 @@ export async function fetchHateCrimesStats(): Promise<HateCrimesStats> {
 }
 export async function fetchHateCrimesMapStats(granularity: MapGranularity = "comarca"): Promise<HateCrimesMapStats> {
   const r = await api.get("/data/stats/hate-crimes/map", { params: { granularity } });
+  return r.data;
+}
+export async function fetchPenalMapStats(params?: {
+  year?: string;
+  month?: string;
+  crime_type?: string;
+}): Promise<PenalMapStats> {
+  const r = await api.get("/data/stats/penal/map", { params });
+  return r.data;
+}
+export async function fetchTransportMapStats(year?: string): Promise<TransportMapStats> {
+  const r = await api.get("/data/stats/transport/map", { params: year ? { year } : {} });
   return r.data;
 }
 export async function fetchTransportStats(): Promise<TransportStats> {

@@ -65,6 +65,57 @@ def overpass_fetch(ql):
     raise Exception("All mirrors exhausted")
 
 
+def assemble_rings(way_segments):
+    """
+    Connect OSM way segments (each a list of [lon,lat] pairs) into closed rings.
+    Ways share endpoints but can arrive in any order or orientation.
+    Returns a list of closed rings.
+    """
+    import math
+
+    EPS = 1e-5
+
+    def dist(a, b):
+        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+    remaining = [list(s) for s in way_segments if len(s) >= 2]
+    rings = []
+
+    while remaining:
+        ring = list(remaining.pop(0))
+        max_passes = len(remaining) + 1
+
+        for _ in range(max_passes):
+            if len(ring) >= 4 and dist(ring[0], ring[-1]) < EPS:
+                break  # ring is closed
+            attached = False
+            for i, seg in enumerate(remaining):
+                if dist(seg[0], ring[-1]) < EPS:         # seg head → ring tail
+                    ring.extend(seg[1:])
+                elif dist(seg[-1], ring[-1]) < EPS:      # seg tail → ring tail (reverse seg)
+                    ring.extend(list(reversed(seg))[1:])
+                elif dist(seg[-1], ring[0]) < EPS:       # seg tail → ring head
+                    ring = seg[:-1] + ring
+                elif dist(seg[0], ring[0]) < EPS:        # seg head → ring head (reverse seg)
+                    ring = list(reversed(seg))[:-1] + ring
+                else:
+                    continue
+                remaining.pop(i)
+                attached = True
+                break
+            if not attached:
+                break
+
+        # Close ring
+        if dist(ring[0], ring[-1]) >= EPS:
+            ring.append(ring[0])
+
+        if len(ring) >= 4:
+            rings.append(ring)
+
+    return rings
+
+
 def osm_to_geojson(elements):
     """Convert Overpass 'out geom;' relations to a GeoJSON FeatureCollection."""
     features = []
@@ -76,43 +127,33 @@ def osm_to_geojson(elements):
         if not name:
             continue
 
-        # Collect outer ring coordinates from member ways
-        outer_rings = []
-        inner_rings = []
+        outer_ways, inner_ways = [], []
         for m in el.get("members", []):
             if m.get("type") != "way" or "geometry" not in m:
                 continue
             coords = [[pt["lon"], pt["lat"]] for pt in m["geometry"]]
-            if len(coords) < 3:
+            if len(coords) < 2:
                 continue
-            # Close the ring if needed
-            if coords[0] != coords[-1]:
-                coords.append(coords[0])
             role = m.get("role", "outer")
             if role == "outer":
-                outer_rings.append(coords)
+                outer_ways.append(coords)
             elif role == "inner":
-                inner_rings.append(coords)
+                inner_ways.append(coords)
+
+        outer_rings = assemble_rings(outer_ways)
+        inner_rings = assemble_rings(inner_ways)
 
         if not outer_rings:
             continue
 
-        # Build geometry: single polygon or multipolygon
         if len(outer_rings) == 1:
-            geom = {
-                "type": "Polygon",
-                "coordinates": [outer_rings[0]] + inner_rings,
-            }
+            geom = {"type": "Polygon", "coordinates": [outer_rings[0]] + inner_rings}
         else:
-            # Each outer ring forms its own polygon (simplification — inners ignored)
-            geom = {
-                "type": "MultiPolygon",
-                "coordinates": [[ring] for ring in outer_rings],
-            }
+            geom = {"type": "MultiPolygon", "coordinates": [[r] for r in outer_rings]}
 
         features.append({
             "type": "Feature",
-            "id": f"relation/{el.get('id','')}",
+            "id": f"relation/{el.get('id', '')}",
             "properties": {
                 "name": name,
                 "admin_level": tags.get("admin_level", ""),
