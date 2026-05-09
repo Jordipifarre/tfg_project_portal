@@ -33,10 +33,6 @@ _TABLE_KEYWORDS: dict[str, dict[str, int]] = {
         "rodalies": 3, "fgc": 3, "tmb": 3,
     },
     "fets_aeroports": {
-        # City names removed — "girona", "reus", "lleida", "sabadell" appear
-        # in queries about any table. Only unambiguous airport terms here.
-        # "vol" / "vols" are kept but matched as whole words, so
-        # "evolució" no longer triggers a false airport match.
         "aeroport": 3, "aeroports": 3, "aeri": 3,
         "vol": 3, "vols": 3, "terminal": 3, "prat": 3,
     },

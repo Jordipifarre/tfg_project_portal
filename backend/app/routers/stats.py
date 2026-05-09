@@ -358,6 +358,61 @@ async def hate_crimes_stats():
 
 
 # ---------------------------------------------------------------------------
+# Hate crimes — geographic map aggregation
+# ---------------------------------------------------------------------------
+
+@router.get("/stats/hate-crimes/map")
+async def hate_crimes_map(granularity: str = "comarca"):
+    if granularity not in {"provincia", "comarca", "municipi"}:
+        raise HTTPException(400, "granularity must be 'provincia', 'comarca', or 'municipi'")
+
+    geo_keywords: dict[str, list[str]] = {
+        "provincia": ["provincia"],
+        "comarca":   ["comarca"],
+        "municipi":  ["municipi"],
+    }
+
+    try:
+        with db._engine.connect() as conn:
+            tables = _get_tables(conn)
+            table = _find_table(tables, "odi", "discrimin")
+            if not table:
+                raise HTTPException(404, "Hate crimes table not found")
+
+            cols = _get_cols(conn, table)
+            ic = _find_col(cols, "nombre fets", "infraccions", "fets o")
+            vc = _find_col(cols, "ictim")
+            gc = _find_col(cols, *geo_keywords[granularity])
+
+            if not gc:
+                raise HTTPException(
+                    422,
+                    f"No column found for granularity '{granularity}'. Available columns: {cols}"
+                )
+            if not ic:
+                raise HTTPException(422, "Incidents column not found")
+
+            victim_sel = f", {_safe_sum(vc)}" if vc else ", 0"
+            r = conn.execute(text(
+                f'SELECT {_q(gc)}, {_safe_sum(ic)}{victim_sel}'
+                f' FROM "{table}"'
+                f' WHERE {_q(gc)} IS NOT NULL AND {_q(gc)}::text <> \'\''
+                f' GROUP BY {_q(gc)}'
+                f' ORDER BY 2 DESC'
+            ))
+            regions = [
+                {"name": str(row[0]), "incidents": int(row[1] or 0), "victims": int(row[2] or 0)}
+                for row in r
+            ]
+            return {"regions": regions, "granularity": granularity}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Hate crimes map: %s", e)
+        raise HTTPException(500, str(e))
+
+
+# ---------------------------------------------------------------------------
 # Transport
 # ---------------------------------------------------------------------------
 

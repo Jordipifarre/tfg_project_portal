@@ -1,14 +1,22 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
-import { fetchHateCrimesStats, type HateCrimesStats } from "@/lib/api";
+import {
+  fetchHateCrimesStats,
+  fetchHateCrimesMapStats,
+  type HateCrimesStats,
+  type MapGranularity,
+} from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, Users, Wifi } from "lucide-react";
+
+const CataloniaMap = dynamic(() => import("./CataloniaMap"), { ssr: false });
 
 const TT = {
   backgroundColor: "#ffffff",
@@ -25,9 +33,21 @@ export function HateCrimesDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [mapGranularity, setMapGranularity] = useState<MapGranularity>("comarca");
+  const [mapData, setMapData] = useState<{ name: string; incidents: number; victims: number }[]>([]);
+  const [mapLoading, setMapLoading] = useState(true);
+
   useEffect(() => {
     fetchHateCrimesStats().then(setData).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    setMapLoading(true);
+    fetchHateCrimesMapStats(mapGranularity)
+      .then((d) => setMapData(d.regions))
+      .catch(() => setMapData([]))
+      .finally(() => setMapLoading(false));
+  }, [mapGranularity]);
 
   if (loading) return <Skeleton className="h-[600px] rounded-lg bg-gray-100" />;
   if (error) return <ErrorBox msg={error} />;
@@ -75,6 +95,20 @@ export function HateCrimesDashboard() {
             <Line type="monotone" dataKey="victims" name="Víctimes" stroke="#dc2626" strokeWidth={2} strokeDasharray="5 3" dot={false} />
           </LineChart>
         </ResponsiveContainer>
+      </Card>
+
+      <Card title="Distribució Geogràfica" sub="Incidents per zona — passa el cursor per veure el detall">
+        {mapLoading ? (
+          <div className="h-[380px] flex items-center justify-center text-[#9ca3af] text-sm">
+            Carregant dades del mapa…
+          </div>
+        ) : (
+          <CataloniaMap
+            data={mapData}
+            granularity={mapGranularity}
+            onGranularityChange={setMapGranularity}
+          />
+        )}
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

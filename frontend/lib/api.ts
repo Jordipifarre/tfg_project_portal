@@ -37,6 +37,11 @@ export interface HateCrimesStats {
   by_channel: { channel: string; total: number }[];
   by_scope: { scope: string; total: number }[];
 }
+export type MapGranularity = "provincia" | "comarca" | "municipi";
+export interface HateCrimesMapStats {
+  regions: { name: string; incidents: number; victims: number }[];
+  granularity: MapGranularity;
+}
 export interface TransportStats {
   trend: { year: string; bus?: number; metro?: number; taxi?: number; train?: number }[];
   by_mode: { mode: string; total: number }[];
@@ -68,6 +73,10 @@ export async function fetchAirportStats(): Promise<AirportStats> {
 }
 export async function fetchHateCrimesStats(): Promise<HateCrimesStats> {
   const r = await api.get("/data/stats/hate-crimes"); return r.data;
+}
+export async function fetchHateCrimesMapStats(granularity: MapGranularity = "comarca"): Promise<HateCrimesMapStats> {
+  const r = await api.get("/data/stats/hate-crimes/map", { params: { granularity } });
+  return r.data;
 }
 export async function fetchTransportStats(): Promise<TransportStats> {
   const r = await api.get("/data/stats/transport"); return r.data;
