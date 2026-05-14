@@ -1,6 +1,6 @@
 import re
 import logging
-from app.agents.sql.schema import _get_schema
+from app.pipelines.sql.schema import _get_schema
 
 logger = logging.getLogger(__name__)
 

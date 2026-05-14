@@ -4,8 +4,8 @@ import difflib
 import logging
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
-from app.agents.sql.schema import _get_schema, _MAX_ROWS
-from app.agents.sql.table_selector import _select_relevant_tables, _schema_string
+from app.pipelines.sql.schema import _get_schema, _MAX_ROWS
+from app.pipelines.sql.table_selector import _select_relevant_tables, _schema_string
 
 logger = logging.getLogger(__name__)
 

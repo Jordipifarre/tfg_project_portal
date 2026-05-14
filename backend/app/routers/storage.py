@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from app.services.storage import storage_service
-from app.agents.rag_agent import rebuild_index
+from app.pipelines.rag_pipeline import rebuild_index
 
 router = APIRouter()
 

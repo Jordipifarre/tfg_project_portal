@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from app.agents.query_router import get_ai_response
-from app.agents.sql_converter import query_database
+from app.pipelines.query_router import get_ai_response
+from app.pipelines.sql_converter import query_database
 import logging
 
 logger = logging.getLogger(__name__)

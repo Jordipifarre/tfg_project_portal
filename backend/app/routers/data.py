@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
-from app.agents.sql_converter import db 
+from app.pipelines.sql_converter import db
 
 router = APIRouter()
 

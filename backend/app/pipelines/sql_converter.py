@@ -1,9 +1,9 @@
 import logging
 from langchain_ollama import ChatOllama
-from app.agents.sql.schema import db
-from app.agents.sql.sql_generator import generate_sql
-from app.agents.sql.sql_executor import execute_sql
-from app.agents.sql.result_formatter import format_result
+from app.pipelines.sql.schema import db
+from app.pipelines.sql.sql_generator import generate_sql
+from app.pipelines.sql.sql_executor import execute_sql
+from app.pipelines.sql.result_formatter import format_result
 from app.core.config import settings
 
 __all__ = ["query_database", "db"]

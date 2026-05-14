@@ -2,7 +2,7 @@ import re
 import unicodedata
 import logging
 from sqlalchemy import text
-from app.agents.sql.schema import db, _get_schema, _MAX_ROWS
+from app.pipelines.sql.schema import db, _get_schema, _MAX_ROWS
 
 logger = logging.getLogger(__name__)
 
