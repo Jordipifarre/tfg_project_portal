@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Home, LayoutDashboard, Database, MessageSquare,
   ShieldAlert, Plane, AlertTriangle, Train, ChevronDown,
+  Table2, FileText,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,11 @@ const dashboardChildren = [
   { href: "/dashboard/transport",   icon: Train,           label: "Transport Públic",   exact: false, color: "text-emerald-300"},
 ];
 
+const explorerChildren = [
+  { href: "/explorer/tables",   icon: Table2,    label: "Taules de Dades",    exact: false, color: "text-sky-300"     },
+  { href: "/explorer/articles", icon: FileText,  label: "Articles i Informes", exact: false, color: "text-amber-300"  },
+];
+
 interface SidebarNavProps {
   collapsed?: boolean;
   onNavigate?: () => void;
@@ -25,9 +31,12 @@ interface SidebarNavProps {
 export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
   const pathname = usePathname();
   const isDashboard = pathname.startsWith("/dashboard");
+  const isExplorer = pathname.startsWith("/explorer");
   const [dashOpen, setDashOpen] = useState(isDashboard);
+  const [explorerOpen, setExplorerOpen] = useState(isExplorer);
 
   useEffect(() => { if (isDashboard) setDashOpen(true); }, [isDashboard]);
+  useEffect(() => { if (isExplorer) setExplorerOpen(true); }, [isExplorer]);
 
   const isActive = (href: string, exact = false) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");
@@ -52,7 +61,22 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
             ))}
           </div>
         )}
-        <CollapseNavIcon href="/explorer" icon={<Database size={18} />} active={pathname.startsWith("/explorer")} title="Data Explorer" onClick={onNavigate} />
+        <CollapseNavIcon href="/explorer/tables" icon={<Database size={18} />} active={isExplorer} title="Data Explorer" onClick={onNavigate} />
+        {isExplorer && (
+          <div className="flex flex-col items-center gap-1 mt-0.5 mb-1">
+            {explorerChildren.map((item) => (
+              <CollapseNavIcon
+                key={item.href}
+                href={item.href}
+                icon={<item.icon size={14} />}
+                active={isActive(item.href, item.exact)}
+                title={item.label}
+                small
+                onClick={onNavigate}
+              />
+            ))}
+          </div>
+        )}
         <CollapseNavIcon href="/chat" icon={<MessageSquare size={18} />} active={pathname.startsWith("/chat")} title="Smart Chat" onClick={onNavigate} />
       </nav>
     );
@@ -111,7 +135,55 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
         )}
       </div>
 
-      <NavLink href="/explorer" icon={<Database size={16} />} label="Data Explorer" active={pathname.startsWith("/explorer")} onClick={onNavigate} />
+      {/* Explorer group */}
+      <div>
+        <button
+          onClick={() => setExplorerOpen(!explorerOpen)}
+          className={cn(
+            "w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+            isExplorer
+              ? "bg-white/15 text-white"
+              : "text-white/60 hover:text-white hover:bg-white/10"
+          )}
+        >
+          <span className="flex items-center gap-2.5">
+            <Database size={16} />
+            Data Explorer
+          </span>
+          <ChevronDown
+            size={14}
+            className={cn("transition-transform duration-200 shrink-0", explorerOpen && "rotate-180")}
+          />
+        </button>
+
+        {explorerOpen && (
+          <div className="mt-0.5 ml-3 pl-3 border-l border-white/10 space-y-0.5">
+            {explorerChildren.map((item) => {
+              const active = isActive(item.href, item.exact);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
+                    active
+                      ? "bg-white/15 text-white"
+                      : "text-white/50 hover:text-white hover:bg-white/10"
+                  )}
+                >
+                  <item.icon
+                    size={14}
+                    className={cn(active ? "text-white" : item.color)}
+                  />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       <NavLink href="/chat" icon={<MessageSquare size={16} />} label="Smart Chat" active={pathname.startsWith("/chat")} onClick={onNavigate} />
     </nav>
   );

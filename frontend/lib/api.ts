@@ -119,3 +119,32 @@ export async function fetchTransportMapStats(year?: string): Promise<TransportMa
 export async function fetchTransportStats(): Promise<TransportStats> {
   const r = await api.get("/data/stats/transport"); return r.data;
 }
+
+// --- Storage API ---
+export interface StorageFile {
+  name: string;
+  id?: string;
+  updated_at?: string;
+  created_at?: string;
+  last_accessed_at?: string;
+  metadata?: { size?: number; mimetype?: string; cacheControl?: string };
+}
+export interface StorageFilesResponse {
+  bucket: string;
+  folder: string;
+  count: number;
+  files: StorageFile[];
+}
+export interface SignedUrlResponse {
+  signed_url: string;
+  expires_in_seconds: number;
+}
+
+export async function fetchStorageFiles(folder = ""): Promise<StorageFilesResponse> {
+  const r = await api.get("/storage/files", { params: folder ? { folder } : {} });
+  return r.data;
+}
+export async function getStorageSignedUrl(path: string, expiresIn = 3600): Promise<SignedUrlResponse> {
+  const r = await api.get("/storage/signed-url", { params: { path, expires_in: expiresIn } });
+  return r.data;
+}

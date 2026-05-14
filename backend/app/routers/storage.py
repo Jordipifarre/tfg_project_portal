@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from app.services.storage import storage_service
+from app.agents.rag_agent import rebuild_index
 
 router = APIRouter()
 
@@ -44,5 +45,14 @@ def download_file(path: str = Query(..., description="Ruta del fitxer dins del b
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rebuild-index")
+def rebuild_rag_index():
+    """Re-downloads all PDFs from storage and rebuilds the RAG vector index."""
+    try:
+        return rebuild_index()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
