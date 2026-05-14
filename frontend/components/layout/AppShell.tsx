@@ -33,10 +33,10 @@ function SidebarContent({
         {!collapsed && (
           <div className="overflow-hidden flex-1">
             <p className="font-bold text-sm tracking-tight text-white truncate font-serif">
-              Safecast AI
+              SeguretatCat
             </p>
             <p className="text-[10px] text-white/50 leading-none mt-0.5 truncate">
-              Catalunya Security Portal
+              Portal de Seguretat de Catalunya
             </p>
           </div>
         )}
@@ -133,7 +133,7 @@ export function AppShell({ children }: AppShellProps) {
             <ShieldCheck className="text-white w-4 h-4" />
           </div>
           <p className="font-bold text-sm tracking-tight text-white font-serif">
-            Safecast AI
+            SeguretatCat
           </p>
         </header>
 

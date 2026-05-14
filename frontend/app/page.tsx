@@ -259,7 +259,7 @@ export default function HomePage() {
       <footer className="border-t border-[#e5e5e5] pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#9ca3af]">
         <div className="flex items-center gap-2">
           <ShieldCheck size={14} className="text-[#1a3a52]" />
-          <span className="font-medium text-[#475569]">Safecast AI</span>
+          <span className="font-medium text-[#475569]">SeguretatCat</span>
           <span>·</span>
           <span>Treball de Fi de Grau · Universitat de Lleida · 2026</span>
         </div>

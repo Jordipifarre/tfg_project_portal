@@ -18,8 +18,8 @@ const publicSans = Public_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Safecast AI — Public Safety Data Platform",
-  description: "Transforming Raw Safety Data into Actionable Intelligence",
+  title: "SeguretatCat — Portal de Dades de Seguretat de Catalunya",
+  description: "Transformant les dades de seguretat en informació útil per a la ciutadania",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

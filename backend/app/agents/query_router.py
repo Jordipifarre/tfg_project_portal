@@ -108,12 +108,16 @@ def _answer_general(question: str) -> str:
 # ---------------------------------------------------------------------------
 
 def get_ai_response(user_message: str) -> str:
-    if settings.ENABLE_DYNAMIC_ROUTING:
+    mode = settings.ROUTING_MODE.strip().lower()
+
+    if mode in {"sql", "rag"}:
+        query_type = mode  # forced pipeline — useful for testing
+    elif settings.ENABLE_DYNAMIC_ROUTING:
         query_type = _classify(user_message)
     else:
         query_type = "sql"
 
-    logger.info("Query classified as '%s': %s", query_type, user_message[:80])
+    logger.info("Query routed to '%s' (mode=%s): %s", query_type, mode, user_message[:80])
 
     if query_type == "sql":
         return query_database(user_message, model=settings.OLLAMA_SQL_MODEL)
