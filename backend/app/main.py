@@ -1,4 +1,6 @@
 import logging
+import threading
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.core.config import settings
 from app.services.database import supabase
@@ -14,10 +16,34 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _auto_build_index() -> None:
+    """Build the RAG index on startup if the table is empty."""
+    try:
+        from app.pipelines.rag_pipeline import _count_chunks, rebuild_index
+        if _count_chunks() == 0:
+            logger.info("document_chunks is empty — building RAG index from bucket…")
+            result = rebuild_index()
+            logger.info("Startup RAG index build: %s", result)
+        else:
+            logger.info("RAG index already populated, skipping startup build.")
+    except Exception as e:
+        logger.error("Startup RAG index build failed: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(target=_auto_build_index, daemon=True).start()
+    yield
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="0.1.0",
     description="API for TFG Portal",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

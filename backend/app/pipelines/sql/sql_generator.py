@@ -2,7 +2,7 @@ import json
 import re
 import difflib
 import logging
-from langchain_ollama import ChatOllama
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.pipelines.sql.schema import _get_schema, _MAX_ROWS
 from app.pipelines.sql.table_selector import _select_relevant_tables, _schema_string
@@ -203,7 +203,7 @@ def _fix_filter_values(sql: str) -> str:
     return fixed
 
 
-def generate_sql(user_query: str, llm: ChatOllama) -> tuple[str | None, str]:
+def generate_sql(user_query: str, llm: BaseChatModel) -> tuple[str | None, str]:
     relevant_tables = _select_relevant_tables(user_query)
     system_prompt = _make_sql_system_prompt(relevant_tables)
 
@@ -239,5 +239,5 @@ def generate_sql(user_query: str, llm: ChatOllama) -> tuple[str | None, str]:
 
     except Exception as e:
         print(f"[SQL-CONV] ERROR generating SQL: {e}")
-        logger.error("SQL generation failed: %s", e)
+        logger.error("SQL generation failed: %s", e, exc_info=True)
         return None, ""

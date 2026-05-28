@@ -1,35 +1,139 @@
+"""RAG pipeline backed by pgvector (Supabase PostgreSQL).
+
+Document ingestion:
+  1. Download PDFs from Supabase Storage.
+  2. Split into chunks with RecursiveCharacterTextSplitter.
+  3. Embed chunks with FastEmbed (nomic-ai/nomic-embed-text-v1.5, 768-dim).
+  4. Insert into `documents` + `document_chunks` tables.
+
+Retrieval (hybrid):
+  - Semantic: pgvector cosine similarity (embedding <=> query_vector).
+  - Keyword: PostgreSQL ILIKE on chunk content.
+  - Results are merged and deduplicated before being sent to the LLM.
+
+Prerequisites (run backend/sql/setup_pgvector.sql in Supabase once):
+  CREATE EXTENSION IF NOT EXISTS vector;
+  CREATE TABLE documents ( ... );
+  CREATE TABLE document_chunks ( ... );
+"""
+
+from __future__ import annotations
+
 import io
+import json
 import logging
 import threading
 from typing import Optional
 
+import psycopg2
+import psycopg2.extras
 import pypdf
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
 from app.services.storage import storage_service
+from app.utils.embeddings import FastEmbeddings
+from app.utils.ollama_client import get_ollama_client
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# In-memory state — FAISS index + full chunk list for keyword fallback
+# Lazy embeddings singleton
 # ---------------------------------------------------------------------------
 
-_store: Optional[FAISS] = None
-_all_chunks: list[Document] = []
-_store_ready = False
-_build_lock = threading.Lock()
+_embeddings: Optional[FastEmbeddings] = None
+_embed_lock = threading.Lock()
 
+
+def _get_embeddings() -> FastEmbeddings:
+    global _embeddings
+    if _embeddings is None:
+        with _embed_lock:
+            if _embeddings is None:
+                _embeddings = FastEmbeddings()
+    return _embeddings
+
+
+# ---------------------------------------------------------------------------
+# Database helpers
+# ---------------------------------------------------------------------------
+
+def _get_conn() -> psycopg2.extensions.connection:
+    return psycopg2.connect(settings.DATABASE_URL)
+
+
+def _vec_literal(v: list[float]) -> str:
+    """Format a float list as a PostgreSQL vector literal '[x,y,...]'."""
+    return "[" + ",".join(str(x) for x in v) + "]"
+
+
+def _count_chunks() -> int:
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM document_chunks")
+            return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _clear_all() -> None:
+    """Delete every chunk and document record (full rebuild)."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM document_chunks")
+            cur.execute("DELETE FROM documents")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_document(filename: str, chunks: list[Document], vectors: list[list[float]]) -> None:
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO documents (filename, storage_path, status, chunk_count)"
+                " VALUES (%s, %s, %s, %s) RETURNING id",
+                (filename, filename, "indexed", len(chunks)),
+            )
+            doc_id = cur.fetchone()[0]
+
+            psycopg2.extras.execute_values(
+                cur,
+                "INSERT INTO document_chunks (document_id, content, embedding, metadata)"
+                " VALUES %s",
+                [
+                    (
+                        str(doc_id),
+                        chunk.page_content,
+                        _vec_literal(vec),
+                        json.dumps(chunk.metadata),
+                    )
+                    for chunk, vec in zip(chunks, vectors)
+                ],
+                template="(%s, %s, %s::vector, %s::jsonb)",
+            )
+        conn.commit()
+        logger.info("  [%s] → %d chunks inserted", filename, len(chunks))
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# PDF helpers
+# ---------------------------------------------------------------------------
 
 def _pdf_bytes_to_docs(pdf_bytes: bytes, filename: str) -> list[Document]:
-    """Extract page-level Document objects from raw PDF bytes."""
     try:
         reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-        docs = []
+        docs: list[Document] = []
         for i, page in enumerate(reader.pages):
             text = (page.extract_text() or "").strip()
             if text:
@@ -43,16 +147,20 @@ def _pdf_bytes_to_docs(pdf_bytes: bytes, filename: str) -> list[Document]:
         return []
 
 
-def _build_index() -> Optional[FAISS]:
-    """Download every PDF from storage, chunk it, embed it, and return a FAISS store."""
-    global _store_ready, _all_chunks
+# ---------------------------------------------------------------------------
+# Index build / rebuild
+# ---------------------------------------------------------------------------
 
+_build_lock = threading.Lock()
+
+
+def _build_index() -> dict:
+    """Download all PDFs, embed them, and insert into pgvector."""
     try:
         files = storage_service.list_files()
     except Exception as e:
         logger.error("Cannot list storage files: %s", e)
-        _store_ready = True
-        return None
+        return {"status": "error", "total_chunks": 0}
 
     pdf_files = [
         f for f in files
@@ -60,14 +168,15 @@ def _build_index() -> Optional[FAISS]:
     ]
 
     if not pdf_files:
-        logger.warning("No PDFs found in bucket '%s' — RAG unavailable", storage_service.bucket)
-        _store_ready = True
-        return None
+        logger.warning("No PDFs in bucket '%s' — RAG unavailable", settings.SUPABASE_STORAGE_BUCKET)
+        return {"status": "empty", "total_chunks": 0}
 
-    logger.info("Building RAG index from %d PDF(s)…", len(pdf_files))
+    logger.info("Building pgvector index from %d PDF(s)…", len(pdf_files))
+    _clear_all()
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
-    all_chunks: list[Document] = []
+    embeddings = _get_embeddings()
+    total = 0
 
     for file_info in pdf_files:
         name = file_info["name"]
@@ -75,104 +184,81 @@ def _build_index() -> Optional[FAISS]:
             raw_bytes = storage_service.download(name)
             raw_docs = _pdf_bytes_to_docs(raw_bytes, name)
             chunks = splitter.split_documents(raw_docs)
-            all_chunks.extend(chunks)
-            logger.info("  [%s] → %d chunks", name, len(chunks))
+            if not chunks:
+                logger.warning("  [%s] no text extracted — skipped", name)
+                continue
+
+            texts = [c.page_content for c in chunks]
+            vectors = embeddings.embed_documents(texts)
+            _insert_document(name, chunks, vectors)
+            total += len(chunks)
         except Exception as e:
-            logger.error("  [%s] failed: %s", name, e)
+            logger.error("  [%s] failed: %s", name, e, exc_info=True)
 
-    if not all_chunks:
-        logger.warning("No text extracted from any PDF — RAG index empty")
-        _store_ready = True
-        return None
-
-    _all_chunks = all_chunks  # keep for keyword fallback
-
-    embeddings = OllamaEmbeddings(
-        base_url=settings.OLLAMA_BASE_URL,
-        model=settings.OLLAMA_EMBED_MODEL,
-    )
-
-    texts = [c.page_content for c in all_chunks]
-    metadatas = [c.metadata for c in all_chunks]
-    batch_size = 50
-
-    try:
-        logger.info("Embedding %d chunks with '%s' (batches of %d)…",
-                    len(texts), settings.OLLAMA_EMBED_MODEL, batch_size)
-        all_vectors: list = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            all_vectors.extend(embeddings.embed_documents(batch))
-            logger.info("  Embedded %d / %d", min(i + batch_size, len(texts)), len(texts))
-
-        store = FAISS.from_embeddings(
-            text_embeddings=list(zip(texts, all_vectors)),
-            embedding=embeddings,
-            metadatas=metadatas,
-        )
-        logger.info("RAG index ready: %d total chunks", len(texts))
-        _store_ready = True
-        return store
-    except Exception as e:
-        logger.error("FAISS build failed: %s", e)
-        _store_ready = True
-        return None
-
-
-def _get_store() -> Optional[FAISS]:
-    """Return the cached index, building it on the first call (double-checked locking)."""
-    global _store, _store_ready
-    if _store_ready:
-        return _store
-    with _build_lock:
-        if not _store_ready:
-            _store = _build_index()
-    return _store
+    logger.info("pgvector index ready: %d total chunks", total)
+    return {"status": "ok" if total > 0 else "empty", "total_chunks": total}
 
 
 def rebuild_index() -> dict:
-    """Force a fresh index rebuild — call this after uploading new PDFs."""
-    global _store, _store_ready, _all_chunks
+    """Force a complete index rebuild. Call after uploading new PDFs."""
     with _build_lock:
-        _store_ready = False
-        _all_chunks = []
-        _store = _build_index()
-    total = _store.index.ntotal if _store else 0
-    return {"status": "ok" if _store else "empty", "total_chunks": total}
+        return _build_index()
 
 
 # ---------------------------------------------------------------------------
-# Hybrid retrieval: semantic (FAISS) + keyword fallback
+# Hybrid retrieval
 # ---------------------------------------------------------------------------
 
-def _keyword_search(query: str, chunks: list[Document], k: int = 4) -> list[Document]:
-    """
-    Score chunks by how many distinct query words they contain.
-    Catches proper nouns and acronyms that semantic search misses.
-    """
-    # Keep words longer than 3 chars to skip articles/prepositions
+def _semantic_search(query_vec: list[float], k: int = 8) -> list[Document]:
+    """Cosine-similarity search via pgvector (<=> operator)."""
+    vec_lit = _vec_literal(query_vec)
+    conn = _get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                """
+                SELECT content, metadata
+                FROM document_chunks
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (vec_lit, k),
+            )
+            rows = cur.fetchall()
+        return [Document(page_content=r["content"], metadata=r["metadata"] or {}) for r in rows]
+    finally:
+        conn.close()
+
+
+def _keyword_search(query: str, k: int = 4) -> list[Document]:
+    """PostgreSQL ILIKE keyword search — catches proper nouns semantic search misses."""
     terms = [w.lower() for w in query.split() if len(w) > 3]
     if not terms:
         return []
 
-    scored: list[tuple[int, Document]] = []
-    for chunk in chunks:
-        content_lower = chunk.page_content.lower()
-        hits = sum(1 for t in terms if t in content_lower)
-        if hits > 0:
-            scored.append((hits, chunk))
+    conditions = " OR ".join("content ILIKE %s" for _ in terms)
+    params = [f"%{t}%" for t in terms] + [k * 3]
 
-    scored.sort(key=lambda x: -x[0])
-    return [doc for _, doc in scored[:k]]
+    conn = _get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                f"SELECT content, metadata FROM document_chunks WHERE {conditions} LIMIT %s",
+                params,
+            )
+            rows = cur.fetchall()
+        return [Document(page_content=r["content"], metadata=r["metadata"] or {}) for r in rows]
+    finally:
+        conn.close()
 
 
-def _hybrid_search(store: FAISS, question: str, k_semantic: int = 8, k_keyword: int = 4) -> list[Document]:
-    """
-    Merge semantic and keyword results, deduplicating by (source, page).
-    Semantic results come first so the LLM sees the most relevant context up front.
-    """
-    semantic = store.similarity_search(question, k=k_semantic)
-    keyword = _keyword_search(question, _all_chunks, k=k_keyword)
+def _hybrid_search(question: str, k_semantic: int = 8, k_keyword: int = 4) -> list[Document]:
+    """Merge semantic + keyword results, deduplicating by (source, page)."""
+    embeddings = _get_embeddings()
+    query_vec = embeddings.embed_query(question)
+
+    semantic = _semantic_search(query_vec, k=k_semantic)
+    keyword = _keyword_search(question, k=k_keyword)
 
     seen: set[tuple] = set()
     merged: list[Document] = []
@@ -181,12 +267,11 @@ def _hybrid_search(store: FAISS, question: str, k_semantic: int = 8, k_keyword: 
         if key not in seen:
             seen.add(key)
             merged.append(doc)
-
     return merged
 
 
 # ---------------------------------------------------------------------------
-# Answer
+# Answer generation
 # ---------------------------------------------------------------------------
 
 _RAG_SYSTEM = """Ets un assistent especialitzat en documentació oficial catalana sobre seguretat pública.
@@ -196,50 +281,50 @@ Respon sempre en català. Cita el nom del document i la pàgina quan sigui possi
 
 
 def answer_from_documents(question: str) -> str:
-    store = _get_store()
-
-    if store is None:
+    logger.info("=== RAG answer_from_documents START | query: %r ===", question)
+    try:
+        count = _count_chunks()
+    except Exception as e:
+        logger.error("pgvector count failed: %s", e, exc_info=True)
         return (
-            "No hi ha documents indexats disponibles. "
-            "Comprova que el bucket d'emmagatzematge conté fitxers PDF "
-            "o utilitza l'endpoint /storage/rebuild-index per re-indexar."
+            "No s'ha pogut connectar amb la base de dades vectorial. "
+            "Comprova que l'extensió pgvector està habilitada a Supabase."
         )
 
+    if count == 0:
+        return (
+            "No hi ha documents indexats. "
+            "Puja PDFs al bucket i crida /storage/rebuild-index per indexar-los."
+        )
+
+    logger.info("pgvector chunk count: %d", count)
     try:
-        hits = _hybrid_search(store, question)
+        hits = _hybrid_search(question)
     except Exception as e:
-        logger.error("Hybrid search failed: %s", e)
+        logger.error("Hybrid search failed: %s", e, exc_info=True)
         return "Error en la cerca als documents. Torna-ho a intentar."
 
     if not hits:
         return "No he trobat informació rellevant als documents disponibles per a aquesta pregunta."
 
-    logger.info("RAG retrieved %d chunks: %s",
-                len(hits),
-                [(d.metadata.get("source", "?"), d.metadata.get("page")) for d in hits])
+    logger.info(
+        "RAG retrieved %d chunks: %s",
+        len(hits),
+        [(d.metadata.get("source", "?"), d.metadata.get("page")) for d in hits],
+    )
 
-
-    print("RAG retrieved chunks:")    
     context = "\n\n---\n\n".join(
         f"[{d.metadata.get('source', '?')}, p.{d.metadata.get('page', '?')}]\n{d.page_content}"
         for d in hits
     )
 
-    print("llm entering")
-    llm = ChatOllama(
-        base_url=settings.OLLAMA_BASE_URL,
-        model=settings.OLLAMA_RAG_MODEL,
-        temperature=0.1,
-    )
-
+    llm = get_ollama_client("rag")
     try:
-        print("RAG context for LLM:\n", context)  # Debug log
         msgs = [
             SystemMessage(content=_RAG_SYSTEM),
             HumanMessage(content=f"Context:\n{context}\n\nPregunta: {question}"),
         ]
-        print("INVOKING LLM with messages:\n", msgs)  # Debug log
         return llm.invoke(msgs).content.strip()
     except Exception as e:
-        logger.error("RAG LLM failed: %s", e)
+        logger.error("RAG LLM failed: %s", e, exc_info=True)
         return "Ho sento, no he pogut generar una resposta basada en els documents. Torna-ho a intentar."

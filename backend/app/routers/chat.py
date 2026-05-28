@@ -15,9 +15,9 @@ class ChatRequest(BaseModel):
 
 @router.post("/ask")
 async def ask_ai(request: ChatRequest):
-    """General chat endpoint — routes to SQL agent, RAG, or direct LLM answer."""
+    """General chat endpoint — delegates to the LangGraph ReAct agent."""
     try:
-        response = await run_in_threadpool(get_ai_response, request.message)
+        response = await get_ai_response(request.message)
     except Exception as e:
         logger.error("Chat endpoint error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -27,7 +27,7 @@ async def ask_ai(request: ChatRequest):
 
 @router.post("/query-db")
 async def ask_database(request: ChatRequest):
-    """Direct SQL query endpoint, bypasses routing."""
+    """Direct SQL query endpoint, bypasses the agent."""
     try:
         response = await run_in_threadpool(query_database, request.message)
     except Exception as e:
