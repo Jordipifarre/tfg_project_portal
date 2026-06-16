@@ -98,7 +98,7 @@ def _get_agent():
     if _agent is None:
         with _agent_lock:
             if _agent is None:
-                llm = get_ollama_client("rag")
+                llm = get_ollama_client("router")
                 _agent = create_react_agent(
                     model=llm,
                     tools=_TOOLS,
