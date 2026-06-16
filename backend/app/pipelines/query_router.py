@@ -54,17 +54,6 @@ def search_documents(query: str) -> str:
     return answer_from_documents(query)
 
 
-@tool
-def query_database_and_summarize(natural_language_query: str) -> str:
-    """
-    Executes a SQL query and returns a natural language summary of the results.
-    Use this for complex analytical questions that need both data retrieval
-    and explanation (trends, comparisons, rankings).
-    """
-    from app.pipelines.sql_converter import query_database as _run_sql
-    return _run_sql(natural_language_query)
-
-
 # ---------------------------------------------------------------------------
 # Agent construction (lazy singleton)
 # ---------------------------------------------------------------------------
@@ -74,12 +63,11 @@ _AGENT_SYSTEM = """Ets l'assistent de SeguretatCat, una plataforma de transparè
 Respon sempre en català, de forma clara, concisa i factual.
 
 Eines disponibles:
-- query_database: per preguntes sobre xifres, estadístiques, incidents, tendències o registres concrets de la base de dades (crim, transport, aeroports, discriminació).
+- query_database: per preguntes sobre xifres, estadístiques, incidents, tendències, comparatives, rànquings o registres concrets de la base de dades (crim, transport, aeroports, discriminació).
 - search_documents: per preguntes sobre informes, normatives, polítiques, metodologies o context que es trobi en documents oficials.
-- query_database_and_summarize: per preguntes analítiques complexes que requereixen dades i explicació (tendències, comparatives, rànquings).
 
 Instruccions:
-1. Si la pregunta és sobre dades concretes (nombres, anys, territoris), utilitza query_database.
+1. Si la pregunta és sobre dades concretes (nombres, anys, territoris, tendències, comparatives), utilitza query_database.
 2. Si la pregunta és sobre el contingut de documents o informes, utilitza search_documents.
 3. Si la pregunta requereix tant dades com context documental, utilitza les dues eines.
 4. No inventis xifres ni informació que no provingui de les eines.
@@ -87,7 +75,7 @@ Instruccions:
 6. Quan cridis search_documents, passa com a query la PREGUNTA REAL de l'usuari (per exemple "quines dades hi ha sobre delictes de odi?"), mai el nom del fitxer ni el títol del document. El sistema ja sap quins documents té indexats.
 """
 
-_TOOLS = [query_database, search_documents, query_database_and_summarize]
+_TOOLS = [query_database, search_documents]
 
 _agent = None
 _agent_lock = threading.Lock()
