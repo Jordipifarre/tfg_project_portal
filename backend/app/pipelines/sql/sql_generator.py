@@ -19,9 +19,9 @@ Use "regió_policial_rp" for city/province filters:
   Tarragona → ILIKE '%%Tarragona%%'
   Lleida    → ILIKE '%%Ponent%%'
   Terres de l'Ebre → ILIKE '%%Terres de l%%'
-  Catalunya (all) → omit filter
+  Catalunya (all) / "tot Catalunya" / no specific region → OMIT the "regió_policial_rp" filter entirely
 
-fets_odi_discriminacio: filter on "municipi" ILIKE '%%city%%' or "província".
+fets_odi_discriminacio: filter on "municipi" ILIKE '%%city%%' only. Do NOT also add "província" filters.
 
 ═══ AGGREGATION ═══
 PRE-AGGREGATED tables — use SUM not COUNT(*):
@@ -57,6 +57,12 @@ User: "Evolució dels fets d'odi a Girona de 2020 a 2024"
 
 User: "Compara fets d'odi presencial amb internet a Girona el 2020"
 {"sql": "SELECT \\"canal_dels_fets\\", COUNT(*) AS total FROM \\"fets_odi_discriminacio\\" WHERE \\"any\\" = '2020' AND \\"municipi\\" ILIKE '%%Girona%%' GROUP BY \\"canal_dels_fets\\" LIMIT 50", "summary_hint": "Comparació de fets d'odi per canal a Girona el 2020"}
+
+User: "Compara incidents d'autobús, metro, taxi i tren el 2023"
+{"sql": "SELECT SUM(CAST(\\"autobús\\" AS NUMERIC)) AS autobus, SUM(CAST(\\"metro\\" AS NUMERIC)) AS metro, SUM(CAST(\\"taxi\\" AS NUMERIC)) AS taxi, SUM(CAST(\\"tren\\" AS NUMERIC)) AS tren FROM \\"fets_transport_public\\" WHERE \\"any\\" = '2023'", "summary_hint": "Incidents per mode de transport a Catalunya el 2023"}
+
+User: "Quants furts a l'aeroport de Girona el 2025"
+{"sql": "SELECT SUM(CAST(\\"nombre\\" AS NUMERIC)) AS total FROM \\"fets_aeroports\\" WHERE \\"any\\" = '2025' AND \\"aeroport\\" ILIKE '%%Vilobí%%' AND \\"tipus_de_fet\\" ILIKE '%%Furt%%'", "summary_hint": "Total de furts a l'aeroport de Girona-Vilobí el 2025"}
 """
 
 _BACKTICK_RE = re.compile(r'`([^`]+)`')
@@ -66,8 +72,10 @@ _ILIKE_COLS = {
     "àrea_bàsica_policial_abp", "àrea_regional_de_trànsit_art__àrea_bàsica_policial_abp",
     "regió_policial_rp", "tipus_de_fet", "títol_codi_penal", "tipus_de_lloc_dels_fets",
 }
+# Columnes numèriques (bigint) on ILIKE és il·legal — el LLM de vegades les usa per error.
+_NUMERIC_COLS = {"any"}
 _FILTER_RE = re.compile(
-    r'"([^"]+)"\s*(=|ILIKE)\s*\'((?:[^\'\\]|\\.)*?)\'',
+    r'''"([^"]+)"\s*(=|ILIKE)\s*'([^']*(?:''[^']*)*)'(?!')''',
     re.IGNORECASE,
 )
 
@@ -108,7 +116,15 @@ def _extract_sql_and_hint(raw: str) -> tuple[str | None, str]:
 
 def _sanitize_sql(sql: str) -> str:
     sql = _BACKTICK_RE.sub(lambda m: f'"{m.group(1)}"', sql)
+    # Convert backslash-escaped apostrophes (\') to PostgreSQL-style ('') before any other processing
+    sql = sql.replace("\\'", "''")
     sql = re.sub(r'(?<!")\bany\b(?!")', '"any"', sql, flags=re.IGNORECASE)
+    # "any" és bigint — ILIKE és il·legal. Normalitzar a comparació exacta.
+    def _fix_any_ilike(m: re.Match) -> str:
+        clean = m.group(1).strip('%').strip()
+        print(f"[SQL-CONV] ANY-ILIKE->EQ: \"any\" ILIKE '{m.group(1)}' -> = '{clean}'")
+        return f'"any" = \'{clean}\''
+    sql = re.sub(r'"any"\s+ILIKE\s+\'([^\']+)\'', _fix_any_ilike, sql, flags=re.IGNORECASE)
     return sql
 
 
@@ -168,10 +184,19 @@ def _fix_filter_values(sql: str) -> str:
     samples = schema[table]["samples"]
 
     def _replace_filter(m: re.Match) -> str:
-        col, val = m.group(1), m.group(3)
+        col, op, val = m.group(1), m.group(2).upper(), m.group(3)
         col_samples = samples.get(col, [])
         val_lower = val.lower()
         col_lower = col.lower()
+
+        # El LLM de vegades usa ILIKE sobre columnes bigint (p.ex. "any") — revertir a =
+        if col_lower in _NUMERIC_COLS and op == "ILIKE":
+            clean_val = val.strip('%').strip()
+            print(f"[SQL-CONV] ILIKE->EQ: \"{col}\" ILIKE '{val}' -> = '{clean_val}'")
+            return f'"{col}" = \'{clean_val}\''
+        # Per a columnes numèriques amb qualsevol altre op, no modificar mai (evita re-conversio a ILIKE)
+        if col_lower in _NUMERIC_COLS:
+            return m.group(0)
 
         exact = any(s.lower() == val_lower for s in col_samples)
         force_ilike = col_lower in _ILIKE_COLS
