@@ -78,7 +78,7 @@ export default function ArticlesPage() {
         <div>
           <h1 className="text-xl font-bold text-[#1f2937]">Articles i Informes</h1>
           <p className="text-xs text-[#6b7280] mt-0.5">
-            Documents PDF disponibles per al sistema RAG — visualitza&apos;ls o descarrega&apos;ls.
+            Documents i informes de referència — visualitza&apos;ls o descarrega&apos;ls.
           </p>
         </div>
       </div>

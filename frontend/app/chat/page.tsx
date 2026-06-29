@@ -14,7 +14,7 @@ export default function ChatPage() {
         <div>
           <h1 className="text-xl font-bold text-[#1f2937]">Smart Chat</h1>
           <p className="text-xs text-[#6b7280] mt-0.5">
-            Agent SQL + pipeline RAG — pregunta sobre les dades de seguretat.
+            Fes preguntes en llenguatge natural sobre les dades de seguretat de Catalunya.
           </p>
         </div>
       </div>

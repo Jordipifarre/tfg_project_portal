@@ -83,7 +83,7 @@ export function HateCrimesDashboard() {
         />
       </div>
 
-      <Card title="Evolució Anual" sub="Incidents i víctimes registrades per any">
+      <Card title="Evolució Anual" sub="Incidents i víctimes registrades per any — nota: no hi ha dades de víctimes disponibles pels anys 2022, 2023 i 2024">
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={data.trend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />

@@ -25,7 +25,7 @@ export default function TablesPage() {
 
   useEffect(() => {
     fetchTables()
-      .then((res) => setTables(res.tables))
+      .then((res) => setTables(res.tables.filter((t: string) => !["documents", "document_chunks"].includes(t))))
       .catch(() =>
         toast({ title: "Error de connexió", description: "No s'han pogut obtenir les taules.", variant: "destructive" })
       );
@@ -84,7 +84,7 @@ export default function TablesPage() {
         <div>
           <h1 className="text-xl font-bold text-[#1f2937]">Taules de Dades</h1>
           <p className="text-xs text-[#6b7280] mt-0.5">
-            Navega directament les taules de Supabase — paginació al servidor, {PAGE_SIZE} files per pàgina.
+            Consulta les dades de seguretat disponibles — selecciona una taula per veure els registres.
           </p>
         </div>
       </div>
