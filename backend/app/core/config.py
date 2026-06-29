@@ -27,8 +27,11 @@ class Settings(BaseSettings):
     OLLAMA_SQL_MODEL: str = "qwen2.5-coder:3b"
     OLLAMA_SUMMARIZE_MODEL: str = "qwen2.5:7b"
     OLLAMA_RAG_MODEL: str = "qwen2.5:7b"
-    # OLLAMA_EMBED_MODEL kept for backwards-compat; embeddings now use FastEmbed
+    # OLLAMA_EMBED_MODEL kept for backwards-compat; embeddings now use local model
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
+    
+    # --- Embeddings hugging face---
+    EMBEDDING_MODEL_PATH: str = r"your path to the local embedding model directory (e.g., onnx/model.onnx)"
 
     # --- OLLAMA: cloud settings (used when OLLAMA_MODE=cloud) ---
     # "cloud" mode = local Ollama acting as proxy to Ollama cloud.

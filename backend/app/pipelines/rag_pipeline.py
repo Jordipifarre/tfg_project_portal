@@ -79,52 +79,6 @@ def _count_chunks() -> int:
         conn.close()
 
 
-def _clear_all() -> None:
-    """Delete every chunk and document record (full rebuild)."""
-    conn = _get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM document_chunks")
-            cur.execute("DELETE FROM documents")
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _insert_document(filename: str, chunks: list[Document], vectors: list[list[float]]) -> None:
-    conn = _get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO documents (filename, storage_path, status, chunk_count)"
-                " VALUES (%s, %s, %s, %s) RETURNING id",
-                (filename, filename, "indexed", len(chunks)),
-            )
-            doc_id = cur.fetchone()[0]
-
-            psycopg2.extras.execute_values(
-                cur,
-                "INSERT INTO document_chunks (document_id, content, embedding, metadata)"
-                " VALUES %s",
-                [
-                    (
-                        str(doc_id),
-                        chunk.page_content,
-                        _vec_literal(vec),
-                        json.dumps(chunk.metadata),
-                    )
-                    for chunk, vec in zip(chunks, vectors)
-                ],
-                template="(%s, %s, %s::vector, %s::jsonb)",
-            )
-        conn.commit()
-        logger.info("  [%s] → %d chunks inserted", filename, len(chunks))
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
 
 # ---------------------------------------------------------------------------
 # PDF helpers
@@ -155,7 +109,12 @@ _build_lock = threading.Lock()
 
 
 def _build_index() -> dict:
-    """Download all PDFs, embed them, and insert into pgvector."""
+    """Download all PDFs, embed them, and insert into pgvector.
+
+    Embedding happens outside the DB transaction so a slow model download
+    cannot leave the tables empty. The old index is only deleted once all
+    vectors are ready and we open a single atomic transaction.
+    """
     try:
         files = storage_service.list_files()
     except Exception as e:
@@ -172,12 +131,12 @@ def _build_index() -> dict:
         return {"status": "empty", "total_chunks": 0}
 
     logger.info("Building pgvector index from %d PDF(s)…", len(pdf_files))
-    _clear_all()
 
+    # --- Phase 1: download + embed (no DB writes yet) ---
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
     embeddings = _get_embeddings()
-    total = 0
 
+    prepared: list[tuple[str, list[Document], list[list[float]]]] = []
     for file_info in pdf_files:
         name = file_info["name"]
         try:
@@ -187,16 +146,53 @@ def _build_index() -> dict:
             if not chunks:
                 logger.warning("  [%s] no text extracted — skipped", name)
                 continue
-
             texts = [c.page_content for c in chunks]
             vectors = embeddings.embed_documents(texts)
-            _insert_document(name, chunks, vectors)
-            total += len(chunks)
+            prepared.append((name, chunks, vectors))
+            logger.info("  [%s] embedded %d chunks", name, len(chunks))
         except Exception as e:
-            logger.error("  [%s] failed: %s", name, e, exc_info=True)
+            logger.error("  [%s] failed during embedding: %s", name, e, exc_info=True)
+
+    if not prepared:
+        logger.error("No PDFs could be embedded — old index preserved")
+        return {"status": "error", "total_chunks": 0}
+
+    # --- Phase 2: atomic DB swap (clear old + insert new in one transaction) ---
+    total = 0
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM document_chunks")
+            cur.execute("DELETE FROM documents")
+            for name, chunks, vectors in prepared:
+                cur.execute(
+                    "INSERT INTO documents (filename, storage_path, status, chunk_count)"
+                    " VALUES (%s, %s, %s, %s) RETURNING id",
+                    (name, name, "indexed", len(chunks)),
+                )
+                doc_id = cur.fetchone()[0]
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO document_chunks (document_id, content, embedding, metadata)"
+                    " VALUES %s",
+                    [
+                        (str(doc_id), chunk.page_content, _vec_literal(vec), json.dumps(chunk.metadata))
+                        for chunk, vec in zip(chunks, vectors)
+                    ],
+                    template="(%s, %s, %s::vector, %s::jsonb)",
+                )
+                total += len(chunks)
+                logger.info("  [%s] → %d chunks inserted", name, len(chunks))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error("DB swap failed — old index preserved: %s", e, exc_info=True)
+        return {"status": "error", "total_chunks": 0}
+    finally:
+        conn.close()
 
     logger.info("pgvector index ready: %d total chunks", total)
-    return {"status": "ok" if total > 0 else "empty", "total_chunks": total}
+    return {"status": "ok", "total_chunks": total}
 
 
 def rebuild_index() -> dict:

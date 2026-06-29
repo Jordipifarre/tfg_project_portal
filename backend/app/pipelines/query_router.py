@@ -73,6 +73,8 @@ Instruccions:
 4. No inventis xifres ni informació que no provingui de les eines.
 5. Si no trobes la informació, indica-ho honestament.
 6. Quan cridis search_documents, passa com a query la PREGUNTA REAL de l'usuari (per exemple "quines dades hi ha sobre delictes de odi?"), mai el nom del fitxer ni el títol del document. El sistema ja sap quins documents té indexats.
+7. IMPORTANT: Quan una eina retorni resultats, reprodueix i sintetitza el contingut complet en la teva resposta final. No resumeixis ni truncis la informació obtinguda. La teva resposta final ha de contenir la informació de l'eina, no simplement confirmar que l'has cridada.
+8. No acabis la resposta preguntant si l'usuari vol més informació; dona sempre una resposta completa des del primer torn.
 """
 
 _TOOLS = [query_database, search_documents]
@@ -106,7 +108,7 @@ async def get_ai_response(user_message: str) -> str:
     try:
         result = await agent.ainvoke(
             {"messages": [HumanMessage(content=user_message)]},
-            config={"recursion_limit": 6},
+            config={"recursion_limit": 15},
         )
     except Exception as e:
         logger.error("Agent invocation failed: %s", e, exc_info=True)
@@ -128,11 +130,28 @@ async def get_ai_response(user_message: str) -> str:
             preview = (content[:120] + "…") if len(content) > 120 else content
             logger.info("  [%d] %s → %r", i, msg_type, preview)
 
+    # Find the last AIMessage and the richest ToolMessage
+    from langchain_core.messages import ToolMessage, AIMessage
+    last_ai_content = ""
+    best_tool_content = ""
     for msg in reversed(messages):
-        content = getattr(msg, "content", "")
-        if content and not isinstance(msg, HumanMessage):
-            logger.info("=== Agent invocation END | returning %d chars ===", len(content))
-            return content.strip()
+        content = getattr(msg, "content", "") or ""
+        if isinstance(msg, AIMessage) and content and not last_ai_content:
+            last_ai_content = content.strip()
+        if isinstance(msg, ToolMessage) and len(content) > len(best_tool_content):
+            best_tool_content = content.strip()
+
+    # If the agent's final answer is suspiciously short compared to the tool result,
+    # fall back to the tool result so the actual information is not lost.
+    if last_ai_content and (not best_tool_content or len(last_ai_content) >= len(best_tool_content) * 0.4):
+        logger.info("=== Agent invocation END | returning AIMessage (%d chars) ===", len(last_ai_content))
+        return last_ai_content
+    if best_tool_content:
+        logger.info(
+            "=== Agent invocation END | AIMessage too short (%d chars), returning ToolMessage (%d chars) ===",
+            len(last_ai_content), len(best_tool_content),
+        )
+        return best_tool_content
 
     logger.warning("Agent returned no usable content in any message")
     return "No he pogut generar una resposta."
