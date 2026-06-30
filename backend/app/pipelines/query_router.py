@@ -75,6 +75,7 @@ Instruccions:
 6. Quan cridis search_documents, passa com a query la PREGUNTA REAL de l'usuari (per exemple "quines dades hi ha sobre delictes de odi?"), mai el nom del fitxer ni el títol del document. El sistema ja sap quins documents té indexats.
 7. IMPORTANT: Quan una eina retorni resultats, reprodueix i sintetitza el contingut complet en la teva resposta final. No resumeixis ni truncis la informació obtinguda. La teva resposta final ha de contenir la informació de l'eina, no simplement confirmar que l'has cridada.
 8. No acabis la resposta preguntant si l'usuari vol més informació; dona sempre una resposta completa des del primer torn.
+9. CRÍTIC - CITES DE DOCUMENTS: Quan search_documents retorni una resposta que inclogui referències a documents (per exemple "[nom_fitxer.pdf, p.3]" o "Font: ..."), has d'incloure EXACTAMENT aquestes cites a la teva resposta final. No eliminis ni reformulis les referències als documents font. L'usuari necessita saber d'on prové la informació.
 """
 
 _TOOLS = [query_database, search_documents]
@@ -142,8 +143,11 @@ async def get_ai_response(user_message: str) -> str:
             best_tool_content = content.strip()
 
     # If the agent's final answer is suspiciously short compared to the tool result,
+    # OR if the tool result has document citations but the AI answer dropped them,
     # fall back to the tool result so the actual information is not lost.
-    if last_ai_content and (not best_tool_content or len(last_ai_content) >= len(best_tool_content) * 0.4):
+    tool_has_citations = ".pdf" in best_tool_content or ", p." in best_tool_content
+    ai_dropped_citations = tool_has_citations and ".pdf" not in last_ai_content and ", p." not in last_ai_content
+    if last_ai_content and not ai_dropped_citations and (not best_tool_content or len(last_ai_content) >= len(best_tool_content) * 0.4):
         logger.info("=== Agent invocation END | returning AIMessage (%d chars) ===", len(last_ai_content))
         return last_ai_content
     if best_tool_content:
